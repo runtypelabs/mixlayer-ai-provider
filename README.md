@@ -75,9 +75,8 @@ for await (const text of result.textStream) process.stdout.write(text)
 ```
 
 The default `mixlayer` instance reads `MIXLAYER_API_KEY` from the environment
-(Node). To set the key (or any other option) explicitly — required in
-Cloudflare Workers / the browser — create your own provider with
-`createMixlayer`.
+(Node). To set the key (or any other option) explicitly, create your own
+provider with `createMixlayer`.
 
 ### Explicit settings
 
