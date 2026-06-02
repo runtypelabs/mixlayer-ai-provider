@@ -3,56 +3,21 @@
 [![npm](https://img.shields.io/npm/v/@runtypelabs/mixlayer-ai-provider.svg)](https://www.npmjs.com/package/@runtypelabs/mixlayer-ai-provider)
 [![license](https://img.shields.io/npm/l/@runtypelabs/mixlayer-ai-provider.svg)](./LICENSE)
 
-An [AI SDK](https://sdk.vercel.ai) provider for **Mixlayer** — open-weight model
-inference served over an OpenAI-compatible endpoint at
-`https://models.mixlayer.ai/v1`. Mixlayer's catalog is currently the
-[Qwen](https://qwenlm.github.io) 3.5 / 3.6 family, and is expected to grow to
-other open-weight families (e.g. Kimi) over time — the provider is
-model-family-agnostic and only layers family-specific tuning on models it
-recognizes.
+An [AI SDK](https://sdk.vercel.ai) provider for [Mixlayer](https://www.mixlayer.com/) —
+fast, open-weight model inference served over an OpenAI-compatible endpoint.
+Mixlayer's catalog is currently the [Qwen](https://qwenlm.github.io) 3.5 / 3.6
+family and grows over time; this provider is model-family-agnostic and only
+layers family-specific tuning on models it recognizes.
 
 It wraps [`@ai-sdk/openai-compatible`](https://www.npmjs.com/package/@ai-sdk/openai-compatible)
-and bakes in everything Mixlayer needs to behave correctly:
+and bakes in everything Mixlayer needs to behave correctly out of the box:
 
-- the Mixlayer base URL default
-- family-specific sampling defaults — currently the recommended Qwen open-weight
-  defaults (thinking / non-thinking, including Mixlayer's documented `thinking`
-  toggle), **scoped to the Qwen 3.5 / 3.6 models** and overridable per request
-  (see below)
-- reasoning middleware that extracts `<think>` tags into AI SDK reasoning parts
-  (the provider also emits native `reasoning_content`)
+- the Mixlayer base URL
+- recommended Qwen sampling defaults (thinking / non-thinking), scoped to the
+  Qwen 3.5 / 3.6 models and overridable per request
+- reasoning support — `<think>` tags and native `reasoning_content` both surface
+  as AI SDK reasoning parts
 - tolerant model-id handling (strips a leading `mixlayer/` prefix)
-
-### Models
-
-The current Mixlayer chat catalog (see the
-[Mixlayer models page](https://models.mixlayer.ai) for the live list and pricing):
-
-| Model id                      |
-| ----------------------------- |
-| `qwen/qwen3.5-4b-free`        |
-| `qwen/qwen3.5-9b`             |
-| `qwen/qwen3.5-27b`            |
-| `qwen/qwen3.5-35b-a3b`        |
-| `qwen/qwen3.5-397b-a17b`      |
-| `qwen/qwen3.6-27b`            |
-| `qwen/qwen3.6-35b-a3b`        |
-
-These are exported as the open `MixlayerChatModelId` union (for editor
-autocomplete) — any model id string is still accepted, so new models and future
-non-Qwen families work without a package update.
-
-### Sampling defaults are scoped to Qwen 3.5 / 3.6
-
-The bundled sampling defaults come from Mixlayer's
-[chat completions parameter reference](https://docs.mixlayer.com/chat-completions#sampling-parameters)
-and [per-model notes](https://docs.mixlayer.com/models#qwen-35), which adapt
-Qwen's published guidance to the parameters Mixlayer exposes. The provider
-applies them only to Qwen 3.5 / 3.6 models, so later Qwen generations and other
-model families pass through untouched. The defaults are also overridable per
-call — any `temperature` / `top_p` / etc. you set on the request takes
-precedence. Use the exported `isQwen35Or36(modelId)` helper if you need the same
-predicate.
 
 ## Install
 
@@ -78,9 +43,7 @@ for await (const text of result.textStream) process.stdout.write(text)
 
 The default `mixlayer` instance reads `MIXLAYER_API_KEY` from the environment
 (Node). To set the key (or any other option) explicitly, create your own
-provider with `createMixlayer`.
-
-### Explicit settings
+provider with `createMixlayer`:
 
 ```ts
 import { createMixlayer } from '@runtypelabs/mixlayer-ai-provider'
@@ -93,10 +56,7 @@ const provider = createMixlayer({
 const model = provider('qwen/qwen3.5-9b')
 ```
 
-### Provider registry
-
-The provider implements the AI SDK provider shape, so it slots into
-`createProviderRegistry`:
+The provider also slots into `createProviderRegistry`:
 
 ```ts
 import { createProviderRegistry } from 'ai'
@@ -105,17 +65,48 @@ const registry = createProviderRegistry({ mixlayer })
 const model = registry.languageModel('mixlayer:qwen/qwen3.6-27b')
 ```
 
+## Models
+
+The current Mixlayer chat catalog (see the
+[Mixlayer models page](https://docs.mixlayer.com/models) for the live list and
+pricing):
+
+| Model id                 |
+| ------------------------ |
+| `qwen/qwen3.5-4b-free`   |
+| `qwen/qwen3.5-9b`        |
+| `qwen/qwen3.5-27b`       |
+| `qwen/qwen3.5-35b-a3b`   |
+| `qwen/qwen3.5-397b-a17b` |
+| `qwen/qwen3.6-27b`       |
+| `qwen/qwen3.6-35b-a3b`   |
+
+These ids power editor autocomplete via the `MixlayerChatModelId` union, but the
+union is open — any model id string is accepted, so new models and future
+non-Qwen families work without a package update.
+
+## Sampling defaults
+
+The provider applies Mixlayer's recommended Qwen sampling defaults
+automatically, drawn from Mixlayer's
+[chat completions parameter reference](https://docs.mixlayer.com/chat-completions#sampling-parameters)
+and [per-model notes](https://docs.mixlayer.com/models#qwen-35). They apply
+**only to Qwen 3.5 / 3.6 models**, so later Qwen generations and other model
+families pass through untouched. Any `temperature` / `top_p` / etc. you set on a
+request always takes precedence. Use the exported `isQwen35Or36(modelId)` helper
+if you need the same predicate.
+
 ## API
 
-| Export                                                         | Description                                                       |
-| -------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `mixlayer`                                                     | Default provider instance (thinking mode, no API key configured) |
-| `createMixlayer(settings)`                                     | Provider factory                                                 |
-| `extractMixlayerModelId(id)`                                   | Strips a leading `mixlayer/` prefix                              |
-| `getMixlayerSamplingDefaults(thinking)`                        | Returns the Qwen sampling defaults for a mode                    |
-| `isQwen35Or36(modelId)`                                        | Whether an id is a Qwen 3.5 / 3.6 model (the scoped generations) |
-| `applyQwenSamplingDefaults(body, thinking?)`                   | Applies the defaults to a request body, scoped to Qwen 3.5 / 3.6 |
-| `MIXLAYER_DEFAULT_BASE_URL`                                    | `https://models.mixlayer.ai/v1`                                  |
+| Export                                                          | Description                                                       |
+| --------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `mixlayer`                                                      | Default provider instance (thinking mode, key from env)          |
+| `createMixlayer(settings)`                                      | Provider factory                                                 |
+| `extractMixlayerModelId(id)`                                    | Strips a leading `mixlayer/` prefix                              |
+| `getMixlayerSamplingDefaults(thinking)`                         | Returns the Qwen sampling defaults for a mode                    |
+| `isQwen35Or36(modelId)`                                         | Whether an id is a Qwen 3.5 / 3.6 model (the scoped generations) |
+| `applyQwenSamplingDefaults(body, thinking?)`                    | Applies the defaults to a request body, scoped to Qwen 3.5 / 3.6 |
+| `MIXLAYER_DEFAULT_BASE_URL`                                     | `https://models.mixlayer.ai/v1`                                  |
 | `MIXLAYER_THINKING_DEFAULTS` / `MIXLAYER_NON_THINKING_DEFAULTS` | The raw sampling-default objects                                 |
 
 The provider also exposes `provider.languageModel(id)` / `provider.chatModel(id)`
@@ -123,44 +114,14 @@ The provider also exposes `provider.languageModel(id)` / `provider.chatModel(id)
 
 ### `MixlayerProviderSettings`
 
-| Option     | Type                      | Default                       | Description                                                              |
-| ---------- | ------------------------- | ----------------------------- | ------------------------------------------------------------------------ |
-| `apiKey`   | `string`                  | —                             | Mixlayer API key                                                         |
-| `baseURL`  | `string`                  | `MIXLAYER_DEFAULT_BASE_URL`   | Override the inference endpoint                                          |
-| `headers`  | `Record<string, string>`  | —                             | Extra headers sent with every request                                   |
-| `fetch`    | `typeof fetch`            | `globalThis.fetch`            | Custom fetch (e.g. instrumented or proxied)                             |
-| `includeUsage` | `boolean`             | —                             | Include usage information in streaming responses                        |
-| `thinking` | `boolean`                 | `true`                        | Apply the thinking (`true`) or non-thinking (`false`) sampling defaults |
-
-## Development
-
-```bash
-pnpm install
-pnpm test        # vitest
-pnpm typecheck   # tsc --noEmit
-pnpm build       # tsup (ESM + CJS + d.ts)
-pnpm validate:models # compares Mixlayer's live /models catalog to autocomplete ids
-```
-
-## Releasing
-
-Versioning and npm publishing are driven by
-[changesets](https://github.com/changesets/changesets).
-
-1. For any user-facing change, add a changeset and pick a bump type:
-
-   ```bash
-   pnpm changeset
-   ```
-
-2. On push to `main`, the Release workflow opens (or updates) a **Version
-   Packages** PR that applies the pending changesets.
-3. Merging that PR bumps the version, regenerates this `CHANGELOG.md`, and
-   publishes to npm with provenance.
-
-Publishing requires an `NPM_TOKEN` repository secret with publish rights to the
-`@runtypelabs` npm org (the package is published as
-`@runtypelabs/mixlayer-ai-provider`).
+| Option         | Type                     | Default                     | Description                                                              |
+| -------------- | ------------------------ | --------------------------- | ------------------------------------------------------------------------ |
+| `apiKey`       | `string`                 | `MIXLAYER_API_KEY` env      | Mixlayer API key                                                         |
+| `baseURL`      | `string`                 | `MIXLAYER_DEFAULT_BASE_URL` | Override the inference endpoint                                          |
+| `headers`      | `Record<string, string>` | —                           | Extra headers sent with every request                                   |
+| `fetch`        | `typeof fetch`           | `globalThis.fetch`          | Custom fetch (e.g. instrumented or proxied)                             |
+| `includeUsage` | `boolean`                | —                           | Include usage information in streaming responses                        |
+| `thinking`     | `boolean`                | `true`                      | Apply the thinking (`true`) or non-thinking (`false`) sampling defaults |
 
 ## License
 
