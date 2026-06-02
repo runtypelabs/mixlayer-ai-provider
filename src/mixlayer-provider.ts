@@ -26,7 +26,12 @@
 //   const provider = createMixlayer({ apiKey, thinking: false })
 
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { wrapLanguageModel, extractReasoningMiddleware, type LanguageModel } from 'ai'
+import {
+  wrapLanguageModel,
+  extractReasoningMiddleware,
+  type LanguageModel,
+  type EmbeddingModel,
+} from 'ai'
 
 /** Default Mixlayer OpenAI-compatible inference endpoint. */
 export const MIXLAYER_DEFAULT_BASE_URL = 'https://models.mixlayer.ai/v1'
@@ -164,9 +169,24 @@ export function createMixlayerFetch(
   return withAuth as typeof fetch
 }
 
+/**
+ * Resolves the Mixlayer API key. Falls back to the `MIXLAYER_API_KEY`
+ * environment variable when no explicit key is supplied. The `process` guard
+ * keeps this safe in non-Node runtimes (e.g. Cloudflare Workers, the browser),
+ * where you pass `apiKey` explicitly instead.
+ */
+function resolveMixlayerApiKey(explicit?: string): string | undefined {
+  if (explicit) return explicit
+  if (typeof process !== 'undefined' && process.env) return process.env.MIXLAYER_API_KEY
+  return undefined
+}
+
 /** Settings for {@link createMixlayer}. */
 export interface MixlayerProviderSettings {
-  /** Mixlayer API key. */
+  /**
+   * Mixlayer API key. Defaults to the `MIXLAYER_API_KEY` environment variable
+   * when omitted (Node only — pass it explicitly in Workers / the browser).
+   */
   apiKey?: string
   /** Override the inference base URL (defaults to {@link MIXLAYER_DEFAULT_BASE_URL}). */
   baseURL?: string
@@ -186,18 +206,24 @@ export interface MixlayerProviderSettings {
 
 /**
  * A Mixlayer provider. Callable directly (`mixlayer(modelId)`) and via the
- * standard AI SDK accessors (`.languageModel` / `.chatModel`).
+ * standard AI SDK accessors. Shaped to work with `createProviderRegistry`.
  */
 export interface MixlayerProvider {
   (modelId: string): LanguageModel
   languageModel(modelId: string): LanguageModel
   chatModel(modelId: string): LanguageModel
+  /**
+   * A Qwen text-embedding model (e.g. `qwen3-embedding-8b`). Requires your
+   * Mixlayer deployment to expose an OpenAI-compatible `/embeddings` endpoint.
+   * The Qwen sampling defaults never apply to embeddings.
+   */
+  textEmbeddingModel(modelId: string): EmbeddingModel
 }
 
 /**
  * Creates a Mixlayer provider backed by `@ai-sdk/openai-compatible`, with the
- * Qwen sampling defaults baked into the request body and `<think>`-tag
- * reasoning extraction wrapped around every model.
+ * Qwen sampling defaults baked into the request body (scoped to Qwen 3.5 / 3.6)
+ * and `<think>`-tag reasoning extraction wrapped around every chat model.
  */
 export function createMixlayer(settings: MixlayerProviderSettings = {}): MixlayerProvider {
   const thinking = settings.thinking ?? true
@@ -205,7 +231,7 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
 
   const openaiCompatible = createOpenAICompatible({
     name: 'mixlayer',
-    apiKey: settings.apiKey,
+    apiKey: resolveMixlayerApiKey(settings.apiKey),
     baseURL: settings.baseURL ?? MIXLAYER_DEFAULT_BASE_URL,
     headers: settings.headers,
     fetch: createMixlayerFetch(baseFetch, settings.gateway),
@@ -228,8 +254,14 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
   const provider = ((modelId: string) => createModel(modelId)) as MixlayerProvider
   provider.languageModel = createModel
   provider.chatModel = createModel
+  provider.textEmbeddingModel = (modelId: string) =>
+    openaiCompatible.embeddingModel(extractMixlayerModelId(modelId))
   return provider
 }
 
-/** Default Mixlayer provider instance (thinking mode, env-free). */
+/**
+ * Default Mixlayer provider instance. Reads `MIXLAYER_API_KEY` from the
+ * environment (Node); construct your own with {@link createMixlayer} to set the
+ * key or other options explicitly.
+ */
 export const mixlayer: MixlayerProvider = createMixlayer()

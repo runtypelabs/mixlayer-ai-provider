@@ -1,5 +1,8 @@
 # mixlayer-ai-provider
 
+[![npm](https://img.shields.io/npm/v/mixlayer-ai-provider.svg)](https://www.npmjs.com/package/mixlayer-ai-provider)
+[![license](https://img.shields.io/npm/l/mixlayer-ai-provider.svg)](./LICENSE)
+
 An [AI SDK](https://sdk.vercel.ai) provider for **Mixlayer** — the open-weight
 [Qwen](https://qwenlm.github.io) inference API served over an OpenAI-compatible
 endpoint at `https://models.mixlayer.ai/v1`.
@@ -40,15 +43,17 @@ import { mixlayer } from 'mixlayer-ai-provider'
 import { streamText } from 'ai'
 
 const result = streamText({
-  model: mixlayer('qwen/qwen3-8b'),
+  model: mixlayer('qwen3-6-27b'),
   prompt: 'Explain reasoning models in one paragraph.',
 })
 
 for await (const text of result.textStream) process.stdout.write(text)
 ```
 
-The default `mixlayer` instance reads no configuration. To set an API key (or
-any other option), create your own provider with `createMixlayer`.
+The default `mixlayer` instance reads `MIXLAYER_API_KEY` from the environment
+(Node). To set the key (or any other option) explicitly — required in
+Cloudflare Workers / the browser — create your own provider with
+`createMixlayer`.
 
 ### Explicit settings
 
@@ -77,6 +82,32 @@ const provider = createMixlayer({
 })
 ```
 
+### Embeddings
+
+If your Mixlayer deployment exposes an OpenAI-compatible `/embeddings` endpoint,
+use a Qwen embedding model:
+
+```ts
+import { embed } from 'ai'
+
+const { embedding } = await embed({
+  model: provider.textEmbeddingModel('qwen3-embedding-8b'),
+  value: 'hello world',
+})
+```
+
+### Provider registry
+
+The provider implements the AI SDK provider shape, so it slots into
+`createProviderRegistry`:
+
+```ts
+import { createProviderRegistry } from 'ai'
+
+const registry = createProviderRegistry({ mixlayer })
+const model = registry.languageModel('mixlayer:qwen3-6-27b')
+```
+
 ## API
 
 | Export                                                         | Description                                                       |
@@ -88,6 +119,9 @@ const provider = createMixlayer({
 | `getMixlayerSamplingDefaults(thinking)`                        | Returns the Qwen sampling defaults for a mode                    |
 | `isQwen35Or36(modelId)`                                        | Whether an id is a Qwen 3.5 / 3.6 model (the scoped generations) |
 | `applyQwenSamplingDefaults(body, thinking?)`                   | Applies the defaults to a request body, scoped to Qwen 3.5 / 3.6 |
+
+The provider also exposes `provider.languageModel(id)` / `provider.chatModel(id)`
+(equivalent to calling `provider(id)`) and `provider.textEmbeddingModel(id)`.
 | `MIXLAYER_DEFAULT_BASE_URL`                                    | `https://models.mixlayer.ai/v1`                                  |
 | `MIXLAYER_THINKING_DEFAULTS` / `MIXLAYER_NON_THINKING_DEFAULTS` | The raw sampling-default objects                                 |
 
@@ -110,6 +144,25 @@ pnpm test        # vitest
 pnpm typecheck   # tsc --noEmit
 pnpm build       # tsup (ESM + CJS + d.ts)
 ```
+
+## Releasing
+
+Versioning and npm publishing are driven by
+[changesets](https://github.com/changesets/changesets).
+
+1. For any user-facing change, add a changeset and pick a bump type:
+
+   ```bash
+   pnpm changeset
+   ```
+
+2. On push to `main`, the Release workflow opens (or updates) a **Version
+   Packages** PR that applies the pending changesets.
+3. Merging that PR bumps the version, regenerates this `CHANGELOG.md`, and
+   publishes to npm with provenance.
+
+Publishing requires an `NPM_TOKEN` repository secret with publish rights to
+`mixlayer-ai-provider`.
 
 ## License
 

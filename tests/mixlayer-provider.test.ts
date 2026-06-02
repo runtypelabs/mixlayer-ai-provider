@@ -168,6 +168,14 @@ describe('createMixlayer', () => {
     expect(mixlayer('qwen/qwen3-8b')).toBeDefined()
   })
 
+  it('exposes a text-embedding model (registry-compatible shape)', () => {
+    const provider = createMixlayer({ apiKey: 'test' })
+    expect(typeof provider.textEmbeddingModel).toBe('function')
+    const embedding = provider.textEmbeddingModel('qwen3-embedding-8b')
+    expect(embedding).toBeDefined()
+    expect((embedding as { specificationVersion?: string }).specificationVersion).toMatch(/^v\d+$/)
+  })
+
   it('exposes the default base URL constant', () => {
     expect(MIXLAYER_DEFAULT_BASE_URL).toBe('https://models.mixlayer.ai/v1')
   })
