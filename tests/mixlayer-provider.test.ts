@@ -33,7 +33,7 @@ describe('getMixlayerSamplingDefaults', () => {
   it('returns non-thinking defaults and disables thinking in extraBody', () => {
     const defaults = getMixlayerSamplingDefaults(false)
     expect(defaults).toBe(MIXLAYER_NON_THINKING_DEFAULTS)
-    expect(defaults.extraBody.chat_template_kwargs).toEqual({ enable_thinking: false })
+    expect(defaults.extraBody.thinking).toBe(false)
   })
 })
 
@@ -84,20 +84,33 @@ describe('applyQwenSamplingDefaults', () => {
     expect(out.top_p).toBe(MIXLAYER_THINKING_DEFAULTS.topP)
     expect(out.top_k).toBe(MIXLAYER_THINKING_DEFAULTS.topK)
     expect(out.presence_penalty).toBe(MIXLAYER_THINKING_DEFAULTS.presencePenalty)
-    expect(out.min_p).toBe(0)
+    expect(out.thinking).toBe(true)
     expect(out.repetition_penalty).toBe(1.0)
+    expect(out).not.toHaveProperty('min_p')
   })
 
-  it('injects the non-thinking defaults (enable_thinking: false) when thinking=false', () => {
+  it('injects the non-thinking defaults (thinking: false) when thinking=false', () => {
     const out = applyQwenSamplingDefaults({ model: 'qwen/qwen3.6-27b', messages: [] }, false)
     expect(out.temperature).toBe(MIXLAYER_NON_THINKING_DEFAULTS.temperature)
-    expect(out.chat_template_kwargs).toEqual({ enable_thinking: false })
+    expect(out.thinking).toBe(false)
   })
 
   it('lets caller-set request values override the defaults', () => {
     const out = applyQwenSamplingDefaults({ model: 'qwen/qwen3.5-9b', temperature: 0, top_p: 0.1 })
     expect(out.temperature).toBe(0)
     expect(out.top_p).toBe(0.1)
+  })
+
+  it('does not let undefined AI SDK call settings erase defaults', () => {
+    const out = applyQwenSamplingDefaults({
+      model: 'qwen/qwen3.5-9b',
+      temperature: undefined,
+      top_p: undefined,
+      presence_penalty: undefined,
+    })
+    expect(out.temperature).toBe(MIXLAYER_THINKING_DEFAULTS.temperature)
+    expect(out.top_p).toBe(MIXLAYER_THINKING_DEFAULTS.topP)
+    expect(out.presence_penalty).toBe(MIXLAYER_THINKING_DEFAULTS.presencePenalty)
   })
 
   it('leaves later-Qwen and other-family models untouched', () => {

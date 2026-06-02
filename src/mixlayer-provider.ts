@@ -40,19 +40,20 @@ export const MIXLAYER_DEFAULT_BASE_URL = 'https://models.mixlayer.ai/v1'
  * open-weight Qwen sizes Mixlayer serves (4B / 9B / 27B / 35B-A3B / 397B-A17B)
  * and stable across the **3.5 and 3.6** generations.
  *
- * Source: the official Qwen HuggingFace model cards' "recommended sampling
- * parameters for generation", e.g.
- * https://huggingface.co/Qwen/Qwen3.6-35B-A3B#:~:text=We%20recommend%20using%20the%20following%20set%20of%20sampling%20parameters%20for%20generation
+ * Source: Mixlayer's chat completion and per-model documentation, which adapts
+ * Qwen's published guidance to the parameters the Mixlayer API exposes:
+ * https://docs.mixlayer.com/chat-completions#sampling-parameters
+ * https://docs.mixlayer.com/models#qwen-35
  *
  * The provider applies them automatically, but ONLY to Qwen 3.5 / 3.6 models
  * (see {@link isQwen35Or36}). Future Qwen generations and any other model family
  * pass through untouched, and any value the caller sets on the request wins
  * (the defaults are overridable per call).
  *
- * Qwen thinks by default. To disable thinking we send
- * `chat_template_kwargs: { enable_thinking: false }` (the vLLM convention).
+ * Qwen thinking is controlled with Mixlayer's documented `thinking` request
+ * field.
  *
- * `extraBody` carries the vLLM-specific fields. The scalar fields
+ * `extraBody` carries Mixlayer-specific fields. The scalar fields
  * (`temperature`, `topP`, `topK`, `presencePenalty`) are also exposed so
  * callers that build their own `streamText`/`generateText` params can reuse
  * them as fallbacks.
@@ -61,8 +62,8 @@ export const MIXLAYER_THINKING_DEFAULTS = {
   temperature: 1.0,
   topP: 0.95,
   topK: 20,
-  presencePenalty: 1.5,
-  extraBody: { min_p: 0, repetition_penalty: 1.0 } as Record<string, unknown>,
+  presencePenalty: 0.0,
+  extraBody: { thinking: true, repetition_penalty: 1.0 } as Record<string, unknown>,
 } as const
 
 export const MIXLAYER_NON_THINKING_DEFAULTS = {
@@ -71,9 +72,8 @@ export const MIXLAYER_NON_THINKING_DEFAULTS = {
   topK: 20,
   presencePenalty: 1.5,
   extraBody: {
-    min_p: 0,
+    thinking: false,
     repetition_penalty: 1.0,
-    chat_template_kwargs: { enable_thinking: false },
   } as Record<string, unknown>,
 } as const
 
@@ -118,6 +118,9 @@ export function applyQwenSamplingDefaults(
   const modelId = typeof body.model === 'string' ? body.model : ''
   if (!isQwen35Or36(modelId)) return body
   const defaults = getMixlayerSamplingDefaults(thinking)
+  const definedBody = Object.fromEntries(
+    Object.entries(body).filter(([, value]) => value !== undefined)
+  )
   // Body keys use the OpenAI/vLLM snake_case wire format.
   return {
     temperature: defaults.temperature,
@@ -125,7 +128,7 @@ export function applyQwenSamplingDefaults(
     top_k: defaults.topK,
     presence_penalty: defaults.presencePenalty,
     ...defaults.extraBody,
-    ...body,
+    ...definedBody,
   }
 }
 
@@ -166,9 +169,11 @@ export interface MixlayerProviderSettings {
   headers?: Record<string, string>
   /** Custom fetch implementation (e.g. an instrumented or proxied fetch). */
   fetch?: typeof fetch
+  /** Include usage information in streaming responses. */
+  includeUsage?: boolean
   /**
    * Whether to apply the Qwen *thinking* sampling defaults. When `false`, the
-   * non-thinking defaults are used (including `enable_thinking: false`).
+   * non-thinking defaults are used (including `thinking: false`).
    * Defaults to `true` — Qwen thinks by default.
    */
   thinking?: boolean
@@ -216,6 +221,7 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
     baseURL: settings.baseURL ?? MIXLAYER_DEFAULT_BASE_URL,
     headers: settings.headers,
     fetch: settings.fetch,
+    includeUsage: settings.includeUsage,
     // Layer in family-specific sampling defaults. Today that's the Qwen 3.5 /
     // 3.6 family only; other families pass through, and any value the caller
     // set on the request wins (overridable per call).

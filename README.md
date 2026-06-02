@@ -16,9 +16,9 @@ and bakes in everything Mixlayer needs to behave correctly:
 
 - the Mixlayer base URL default
 - family-specific sampling defaults — currently the recommended Qwen open-weight
-  defaults (thinking / non-thinking, including the vLLM
-  `chat_template_kwargs.enable_thinking` toggle), **scoped to the Qwen 3.5 / 3.6
-  models** and overridable per request (see below)
+  defaults (thinking / non-thinking, including Mixlayer's documented `thinking`
+  toggle), **scoped to the Qwen 3.5 / 3.6 models** and overridable per request
+  (see below)
 - reasoning middleware that extracts `<think>` tags into AI SDK reasoning parts
   (the provider also emits native `reasoning_content`)
 - tolerant model-id handling (strips a leading `mixlayer/` prefix)
@@ -44,13 +44,15 @@ non-Qwen families work without a package update.
 
 ### Sampling defaults are scoped to Qwen 3.5 / 3.6
 
-The bundled sampling defaults come from the official Qwen HuggingFace model
-cards' [recommended sampling parameters](https://huggingface.co/Qwen/Qwen3.6-35B-A3B#:~:text=We%20recommend%20using%20the%20following%20set%20of%20sampling%20parameters%20for%20generation),
-which are tuned for the **3.5** and **3.6** generations. The provider applies
-them only to those models, so later Qwen generations and other model families
-pass through untouched. The defaults are also overridable per call — any
-`temperature` / `top_p` / etc. you set on the request takes precedence. Use the
-exported `isQwen35Or36(modelId)` helper if you need the same predicate.
+The bundled sampling defaults come from Mixlayer's
+[chat completions parameter reference](https://docs.mixlayer.com/chat-completions#sampling-parameters)
+and [per-model notes](https://docs.mixlayer.com/models#qwen-35), which adapt
+Qwen's published guidance to the parameters Mixlayer exposes. The provider
+applies them only to Qwen 3.5 / 3.6 models, so later Qwen generations and other
+model families pass through untouched. The defaults are also overridable per
+call — any `temperature` / `top_p` / etc. you set on the request takes
+precedence. Use the exported `isQwen35Or36(modelId)` helper if you need the same
+predicate.
 
 ## Install
 
@@ -127,6 +129,7 @@ The provider also exposes `provider.languageModel(id)` / `provider.chatModel(id)
 | `baseURL`  | `string`                  | `MIXLAYER_DEFAULT_BASE_URL`   | Override the inference endpoint                                          |
 | `headers`  | `Record<string, string>`  | —                             | Extra headers sent with every request                                   |
 | `fetch`    | `typeof fetch`            | `globalThis.fetch`            | Custom fetch (e.g. instrumented or proxied)                             |
+| `includeUsage` | `boolean`             | —                             | Include usage information in streaming responses                        |
 | `thinking` | `boolean`                 | `true`                        | Apply the thinking (`true`) or non-thinking (`false`) sampling defaults |
 
 ## Development
@@ -136,6 +139,7 @@ pnpm install
 pnpm test        # vitest
 pnpm typecheck   # tsc --noEmit
 pnpm build       # tsup (ESM + CJS + d.ts)
+pnpm validate:models # compares Mixlayer's live /models catalog to autocomplete ids
 ```
 
 ## Releasing
