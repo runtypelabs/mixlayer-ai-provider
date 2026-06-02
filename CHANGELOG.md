@@ -1,5 +1,11 @@
 # @runtypelabs/mixlayer-ai-provider
 
+## 0.2.1
+
+### Patch Changes
+
+- e03f081: Update the release workflow to use a Node/npm toolchain that supports npm trusted publishing and remove the unused npm token environment variable.
+
 ## 0.2.0
 
 ### Minor Changes
