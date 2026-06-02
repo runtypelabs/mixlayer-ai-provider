@@ -1,5 +1,11 @@
 # @runtypelabs/mixlayer-ai-provider
 
+## 0.2.2
+
+### Patch Changes
+
+- 28345d9: Docs: clean up README for npm — fix the models page link to https://docs.mixlayer.com/models, link the first Mixlayer mention to https://www.mixlayer.com/, and trim internal release tooling detail.
+
 ## 0.2.1
 
 ### Patch Changes
