@@ -5,6 +5,8 @@ import {
   createMixlayerFetch,
   extractMixlayerModelId,
   getMixlayerSamplingDefaults,
+  isQwen35Or36,
+  applyQwenSamplingDefaults,
   MIXLAYER_DEFAULT_BASE_URL,
   MIXLAYER_THINKING_DEFAULTS,
   MIXLAYER_NON_THINKING_DEFAULTS,
@@ -33,6 +35,85 @@ describe('getMixlayerSamplingDefaults', () => {
     const defaults = getMixlayerSamplingDefaults(false)
     expect(defaults).toBe(MIXLAYER_NON_THINKING_DEFAULTS)
     expect(defaults.extraBody.chat_template_kwargs).toEqual({ enable_thinking: false })
+  })
+})
+
+describe('isQwen35Or36', () => {
+  it('matches Qwen 3.5 / 3.6 open-weight ids (dash form, with or without org)', () => {
+    for (const id of [
+      'qwen3-5-9b',
+      'qwen3-5-35b-a3b',
+      'qwen3-5-397b-a17b',
+      'qwen3-6-27b',
+      'qwen3-6-35b-a3b',
+      'qwen/qwen3-5-9b',
+      'mixlayer/qwen/qwen3-6-27b',
+    ]) {
+      expect(isQwen35Or36(id)).toBe(true)
+    }
+  })
+
+  it('matches the dotted form too', () => {
+    expect(isQwen35Or36('qwen3.5-9b')).toBe(true)
+    expect(isQwen35Or36('qwen-3.6-27b')).toBe(true)
+  })
+
+  it('does NOT match other Qwen 3 generations', () => {
+    for (const id of [
+      'qwen3-32b', // Qwen3 (3.0) 32B
+      'qwen3-30b-a3b',
+      'qwen3-235b-a22b',
+      'qwen-3-14b',
+      'qwen3-7-max', // 3.7 — future generation
+      'qwen3-7-plus',
+    ]) {
+      expect(isQwen35Or36(id)).toBe(false)
+    }
+  })
+
+  it('does NOT mistake a 5B/6B size token for a 3.5/3.6 minor version', () => {
+    expect(isQwen35Or36('qwen3-5b')).toBe(false)
+    expect(isQwen35Or36('qwen3-6b')).toBe(false)
+    expect(isQwen35Or36('qwen3-50b')).toBe(false)
+  })
+
+  it('does NOT match non-Qwen models', () => {
+    for (const id of ['gpt-4', 'claude-sonnet-4-6', 'llama-3.5-8b', 'gemini-3-flash']) {
+      expect(isQwen35Or36(id)).toBe(false)
+    }
+  })
+})
+
+describe('applyQwenSamplingDefaults', () => {
+  it('injects the thinking defaults for a Qwen 3.5 / 3.6 model', () => {
+    const out = applyQwenSamplingDefaults({ model: 'qwen3-5-9b', messages: [] })
+    expect(out.temperature).toBe(MIXLAYER_THINKING_DEFAULTS.temperature)
+    expect(out.top_p).toBe(MIXLAYER_THINKING_DEFAULTS.topP)
+    expect(out.top_k).toBe(MIXLAYER_THINKING_DEFAULTS.topK)
+    expect(out.presence_penalty).toBe(MIXLAYER_THINKING_DEFAULTS.presencePenalty)
+    expect(out.min_p).toBe(0)
+    expect(out.repetition_penalty).toBe(1.0)
+  })
+
+  it('injects the non-thinking defaults (enable_thinking: false) when thinking=false', () => {
+    const out = applyQwenSamplingDefaults({ model: 'qwen3-6-27b', messages: [] }, false)
+    expect(out.temperature).toBe(MIXLAYER_NON_THINKING_DEFAULTS.temperature)
+    expect(out.chat_template_kwargs).toEqual({ enable_thinking: false })
+  })
+
+  it('lets caller-set request values override the defaults', () => {
+    const out = applyQwenSamplingDefaults({ model: 'qwen3-5-9b', temperature: 0, top_p: 0.1 })
+    expect(out.temperature).toBe(0)
+    expect(out.top_p).toBe(0.1)
+  })
+
+  it('leaves future-Qwen and non-Qwen models untouched', () => {
+    const future = { model: 'qwen3-7-max', messages: [] }
+    expect(applyQwenSamplingDefaults(future)).toBe(future)
+    const other = { model: 'gpt-4', messages: [] }
+    expect(applyQwenSamplingDefaults(other)).toBe(other)
+    const sizeToken = { model: 'qwen3-5b', messages: [] }
+    expect(applyQwenSamplingDefaults(sizeToken)).toBe(sizeToken)
   })
 })
 

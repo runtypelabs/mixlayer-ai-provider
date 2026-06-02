@@ -9,11 +9,21 @@ and bakes in everything Mixlayer needs to behave correctly:
 
 - the Mixlayer base URL default
 - the official Qwen open-weight sampling defaults (thinking / non-thinking),
-  including the vLLM `chat_template_kwargs.enable_thinking` toggle
+  including the vLLM `chat_template_kwargs.enable_thinking` toggle —
+  **scoped to Qwen 3.5 / 3.6 models** and overridable per request (see below)
 - reasoning middleware that extracts `<think>` tags into AI SDK reasoning parts
   (the provider also emits native `reasoning_content`)
 - an optional Cloudflare AI Gateway fetch wrapper
 - tolerant model-id handling (strips a leading `mixlayer/` prefix)
+
+### Sampling defaults are scoped to Qwen 3.5 / 3.6
+
+The bundled sampling defaults are only tuned for the open-weight Qwen **3.5** and
+**3.6** generations, so the provider applies them only to those models
+(`qwen3-5-*`, `qwen3-6-*`). Future Qwen generations (3.7+) and any non-Qwen model
+pass through untouched. The defaults are also overridable per call — any
+`temperature` / `top_p` / etc. you set on the request takes precedence. Use the
+exported `isQwen35Or36(modelId)` helper if you need the same predicate.
 
 ## Install
 
@@ -76,6 +86,8 @@ const provider = createMixlayer({
 | `createMixlayerFetch(baseFetch, gateway?)`                     | Cloudflare AI Gateway fetch wrapper                              |
 | `extractMixlayerModelId(id)`                                   | Strips a leading `mixlayer/` prefix                              |
 | `getMixlayerSamplingDefaults(thinking)`                        | Returns the Qwen sampling defaults for a mode                    |
+| `isQwen35Or36(modelId)`                                        | Whether an id is a Qwen 3.5 / 3.6 model (the scoped generations) |
+| `applyQwenSamplingDefaults(body, thinking?)`                   | Applies the defaults to a request body, scoped to Qwen 3.5 / 3.6 |
 | `MIXLAYER_DEFAULT_BASE_URL`                                    | `https://models.mixlayer.ai/v1`                                  |
 | `MIXLAYER_THINKING_DEFAULTS` / `MIXLAYER_NON_THINKING_DEFAULTS` | The raw sampling-default objects                                 |
 

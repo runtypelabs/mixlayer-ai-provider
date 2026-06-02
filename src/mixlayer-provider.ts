@@ -34,17 +34,21 @@ export const MIXLAYER_DEFAULT_BASE_URL = 'https://models.mixlayer.ai/v1'
 /**
  * Official Qwen open-weight sampling defaults (from the HuggingFace model
  * cards). These are the same across all open-weight Qwen sizes (9B / 27B /
- * 35B-A3B / 122B-A10B / 397B-A17B) and stable across the 3.5 / 3.6
- * generations. Mixlayer only serves the open-weight Qwen family, so these
- * defaults apply to every model handled by this provider.
+ * 35B-A3B / 122B-A10B / 397B-A17B) and stable across the **3.5 and 3.6**
+ * generations — the only generations these defaults are tuned for.
+ *
+ * The provider applies them automatically, but ONLY to Qwen 3.5 / 3.6 models
+ * (see {@link isQwen35Or36}). Future Qwen generations and any non-Qwen model
+ * pass through untouched, and any value the caller sets on the request wins
+ * (the defaults are overridable per call).
  *
  * Qwen thinks by default. To disable thinking we send
  * `chat_template_kwargs: { enable_thinking: false }` (the vLLM convention).
  *
- * `extraBody` is merged into every request body via `transformRequestBody`.
- * The scalar fields (`temperature`, `topP`, `topK`, `presencePenalty`) are
- * exposed so callers that build their own `streamText`/`generateText` params
- * can use them as fallbacks.
+ * `extraBody` carries the vLLM-specific fields. The scalar fields
+ * (`temperature`, `topP`, `topK`, `presencePenalty`) are also exposed so
+ * callers that build their own `streamText`/`generateText` params can reuse
+ * them as fallbacks.
  */
 export const MIXLAYER_THINKING_DEFAULTS = {
   temperature: 1.0,
@@ -73,6 +77,47 @@ export type MixlayerSamplingDefaults =
 /** Returns the Qwen sampling defaults for the given thinking mode. */
 export function getMixlayerSamplingDefaults(thinking: boolean): MixlayerSamplingDefaults {
   return thinking ? MIXLAYER_THINKING_DEFAULTS : MIXLAYER_NON_THINKING_DEFAULTS
+}
+
+/**
+ * Whether a model id is a Qwen **3.5 or 3.6** model — the generations the
+ * bundled sampling defaults are tuned for. Future Qwen generations (3.7+) and
+ * non-Qwen models return `false`, so they receive vanilla OpenAI-compatible
+ * behavior with no injected defaults.
+ *
+ * Matches both the dash form Mixlayer uses (`qwen3-5-9b`, `qwen3-6-27b`) and a
+ * dotted form (`qwen3.5`, `qwen3.6`), with or without an org segment
+ * (`qwen/qwen3-5-9b`). The minor version must be followed by a separator or the
+ * end of the id, so a size token like `qwen3-5b` (a Qwen3 5B model) is NOT
+ * misread as 3.5.
+ */
+export function isQwen35Or36(modelId: string): boolean {
+  return /qwen-?3[.-][56](?![0-9a-z])/i.test(modelId)
+}
+
+/**
+ * Returns `body` with the Qwen sampling defaults applied — but only when
+ * `body.model` is a Qwen 3.5 / 3.6 model ({@link isQwen35Or36}). Defaults are
+ * spread first and the original `body` last, so any value the caller already
+ * set on the request takes precedence (the defaults are overridable per call).
+ * Non-Qwen / future-Qwen models are returned unchanged.
+ */
+export function applyQwenSamplingDefaults(
+  body: Record<string, unknown>,
+  thinking = true
+): Record<string, unknown> {
+  const modelId = typeof body.model === 'string' ? body.model : ''
+  if (!isQwen35Or36(modelId)) return body
+  const defaults = getMixlayerSamplingDefaults(thinking)
+  // Body keys use the OpenAI/vLLM snake_case wire format.
+  return {
+    temperature: defaults.temperature,
+    top_p: defaults.topP,
+    top_k: defaults.topK,
+    presence_penalty: defaults.presencePenalty,
+    ...defaults.extraBody,
+    ...body,
+  }
 }
 
 /**
@@ -156,7 +201,6 @@ export interface MixlayerProvider {
  */
 export function createMixlayer(settings: MixlayerProviderSettings = {}): MixlayerProvider {
   const thinking = settings.thinking ?? true
-  const defaults = getMixlayerSamplingDefaults(thinking)
   const baseFetch = settings.fetch ?? globalThis.fetch.bind(globalThis)
 
   const openaiCompatible = createOpenAICompatible({
@@ -165,10 +209,10 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
     baseURL: settings.baseURL ?? MIXLAYER_DEFAULT_BASE_URL,
     headers: settings.headers,
     fetch: createMixlayerFetch(baseFetch, settings.gateway),
-    transformRequestBody: (body: Record<string, unknown>) => ({
-      ...body,
-      ...defaults.extraBody,
-    }),
+    // Apply the Qwen sampling defaults, scoped to Qwen 3.5 / 3.6 models only.
+    // Any value the caller set on the request wins (overridable per call).
+    transformRequestBody: (body: Record<string, unknown>) =>
+      applyQwenSamplingDefaults(body, thinking),
   })
 
   const createModel = (modelId: string): LanguageModel => {
