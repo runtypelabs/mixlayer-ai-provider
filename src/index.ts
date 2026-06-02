@@ -11,6 +11,7 @@ export {
   MIXLAYER_NON_THINKING_DEFAULTS,
   type MixlayerProvider,
   type MixlayerProviderSettings,
+  type MixlayerChatModelId,
   type MixlayerGatewayOptions,
   type MixlayerSamplingDefaults,
 } from './mixlayer-provider'

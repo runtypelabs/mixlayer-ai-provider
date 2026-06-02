@@ -1,12 +1,17 @@
-// mixlayer-ai-provider — an AI SDK provider for Mixlayer.
+// @runtypelabs/mixlayer-ai-provider — an AI SDK provider for Mixlayer.
 //
-// Mixlayer serves the open-weight Qwen family over an OpenAI-compatible
-// inference API at https://models.mixlayer.ai/v1. This package
-// wraps `@ai-sdk/openai-compatible` with everything that makes Mixlayer behave
-// correctly out of the box:
+// Mixlayer serves open-weight models over an OpenAI-compatible inference API at
+// https://models.mixlayer.ai/v1. Today the catalog is the Qwen 3.5 / 3.6 family,
+// but Mixlayer is expected to add other open-weight families (e.g. Kimi) over
+// time — so this provider is model-family-agnostic and only layers
+// family-specific sampling defaults on models it recognizes.
+//
+// It wraps `@ai-sdk/openai-compatible` with everything that makes Mixlayer
+// behave correctly out of the box:
 //
 //   - the Mixlayer base URL default
-//   - the official Qwen open-weight sampling defaults (thinking / non-thinking)
+//   - family-specific sampling defaults (currently the Qwen 3.5 / 3.6 defaults,
+//     thinking / non-thinking)
 //   - reasoning middleware that extracts `<think>` tags into AI SDK reasoning
 //     parts (the provider also emits native `reasoning_content`)
 //   - an optional Cloudflare AI Gateway fetch wrapper
@@ -14,11 +19,11 @@
 //
 // Usage mirrors any other AI SDK provider:
 //
-//   import { mixlayer } from 'mixlayer-ai-provider'
+//   import { mixlayer } from '@runtypelabs/mixlayer-ai-provider'
 //   import { streamText } from 'ai'
 //
 //   const result = streamText({
-//     model: mixlayer('qwen/qwen3-8b'),
+//     model: mixlayer('qwen/qwen3.5-9b'),
 //     prompt: 'Hello',
 //   })
 //
@@ -37,13 +42,16 @@ import {
 export const MIXLAYER_DEFAULT_BASE_URL = 'https://models.mixlayer.ai/v1'
 
 /**
- * Official Qwen open-weight sampling defaults (from the HuggingFace model
- * cards). These are the same across all open-weight Qwen sizes (9B / 27B /
- * 35B-A3B / 122B-A10B / 397B-A17B) and stable across the **3.5 and 3.6**
- * generations — the only generations these defaults are tuned for.
+ * Recommended Qwen open-weight sampling defaults. These are the same across the
+ * open-weight Qwen sizes Mixlayer serves (4B / 9B / 27B / 35B-A3B / 397B-A17B)
+ * and stable across the **3.5 and 3.6** generations.
+ *
+ * Source: the official Qwen HuggingFace model cards' "recommended sampling
+ * parameters for generation", e.g.
+ * https://huggingface.co/Qwen/Qwen3.6-35B-A3B#:~:text=We%20recommend%20using%20the%20following%20set%20of%20sampling%20parameters%20for%20generation
  *
  * The provider applies them automatically, but ONLY to Qwen 3.5 / 3.6 models
- * (see {@link isQwen35Or36}). Future Qwen generations and any non-Qwen model
+ * (see {@link isQwen35Or36}). Future Qwen generations and any other model family
  * pass through untouched, and any value the caller sets on the request wins
  * (the defaults are overridable per call).
  *
@@ -86,15 +94,14 @@ export function getMixlayerSamplingDefaults(thinking: boolean): MixlayerSampling
 
 /**
  * Whether a model id is a Qwen **3.5 or 3.6** model — the generations the
- * bundled sampling defaults are tuned for. Future Qwen generations (3.7+) and
- * non-Qwen models return `false`, so they receive vanilla OpenAI-compatible
- * behavior with no injected defaults.
+ * bundled sampling defaults are tuned for. Later Qwen generations (3.7+) and
+ * other model families return `false`, so they receive vanilla
+ * OpenAI-compatible behavior with no injected defaults.
  *
- * Matches both the dash form Mixlayer uses (`qwen3-5-9b`, `qwen3-6-27b`) and a
- * dotted form (`qwen3.5`, `qwen3.6`), with or without an org segment
- * (`qwen/qwen3-5-9b`). The minor version must be followed by a separator or the
- * end of the id, so a size token like `qwen3-5b` (a Qwen3 5B model) is NOT
- * misread as 3.5.
+ * Matches the dotted ids Mixlayer uses (`qwen/qwen3.5-27b`, `qwen/qwen3.6-35b-a3b`),
+ * with or without the `qwen/` org segment, and tolerates a dash form
+ * (`qwen3-5-9b`) too. The minor version must be followed by a separator or the
+ * end of the id, so a bare size token like `qwen3-5b` is not misread as 3.5.
  */
 export function isQwen35Or36(modelId: string): boolean {
   return /qwen-?3[.-][56](?![0-9a-z])/i.test(modelId)
@@ -105,7 +112,10 @@ export function isQwen35Or36(modelId: string): boolean {
  * `body.model` is a Qwen 3.5 / 3.6 model ({@link isQwen35Or36}). Defaults are
  * spread first and the original `body` last, so any value the caller already
  * set on the request takes precedence (the defaults are overridable per call).
- * Non-Qwen / future-Qwen models are returned unchanged.
+ * Models from other families and later Qwen generations are returned unchanged.
+ *
+ * This is the Qwen-family helper; other model families Mixlayer adds in future
+ * (e.g. Kimi) would get their own scoped helper alongside this one.
  */
 export function applyQwenSamplingDefaults(
   body: Record<string, unknown>,
@@ -127,9 +137,10 @@ export function applyQwenSamplingDefaults(
 
 /**
  * Strips a leading `mixlayer/` (or `mixlayer:`) prefix from a model id so
- * callers can pass either the bare upstream id (`qwen/qwen3-8b`) or a
- * routed/prefixed id (`mixlayer/qwen/qwen3-8b`). Anything without a recognized
- * prefix is returned unchanged.
+ * callers can pass either the bare upstream id (`qwen/qwen3.5-9b`) or a
+ * routed/prefixed id (`mixlayer/qwen/qwen3.5-9b`). The model's own org segment
+ * (e.g. `qwen/`) is preserved; anything without a recognized prefix is returned
+ * unchanged.
  */
 export function extractMixlayerModelId(model: string): string {
   const trimmed = model.trim()
@@ -205,17 +216,34 @@ export interface MixlayerProviderSettings {
 }
 
 /**
+ * Known Mixlayer chat model ids (current catalog). The `(string & {})` member
+ * keeps the union open: Mixlayer adds models over time and is expected to serve
+ * non-Qwen families (e.g. Kimi) in future, so any model id string is accepted —
+ * the listed ids just provide editor autocomplete.
+ */
+export type MixlayerChatModelId =
+  | 'qwen/qwen3.5-4b-free'
+  | 'qwen/qwen3.5-9b'
+  | 'qwen/qwen3.5-27b'
+  | 'qwen/qwen3.5-35b-a3b'
+  | 'qwen/qwen3.5-397b-a17b'
+  | 'qwen/qwen3.6-27b'
+  | 'qwen/qwen3.6-35b-a3b'
+  // eslint-disable-next-line @typescript-eslint/ban-types -- open-union autocomplete idiom
+  | (string & {})
+
+/**
  * A Mixlayer provider. Callable directly (`mixlayer(modelId)`) and via the
  * standard AI SDK accessors. Shaped to work with `createProviderRegistry`.
  */
 export interface MixlayerProvider {
-  (modelId: string): LanguageModel
-  languageModel(modelId: string): LanguageModel
-  chatModel(modelId: string): LanguageModel
+  (modelId: MixlayerChatModelId): LanguageModel
+  languageModel(modelId: MixlayerChatModelId): LanguageModel
+  chatModel(modelId: MixlayerChatModelId): LanguageModel
   /**
-   * A Qwen text-embedding model (e.g. `qwen3-embedding-8b`). Requires your
-   * Mixlayer deployment to expose an OpenAI-compatible `/embeddings` endpoint.
-   * The Qwen sampling defaults never apply to embeddings.
+   * A text-embedding model, if your Mixlayer deployment exposes an
+   * OpenAI-compatible `/embeddings` endpoint. Family sampling defaults never
+   * apply to embeddings.
    */
   textEmbeddingModel(modelId: string): EmbeddingModel
 }
@@ -235,13 +263,14 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
     baseURL: settings.baseURL ?? MIXLAYER_DEFAULT_BASE_URL,
     headers: settings.headers,
     fetch: createMixlayerFetch(baseFetch, settings.gateway),
-    // Apply the Qwen sampling defaults, scoped to Qwen 3.5 / 3.6 models only.
-    // Any value the caller set on the request wins (overridable per call).
+    // Layer in family-specific sampling defaults. Today that's the Qwen 3.5 /
+    // 3.6 family only; other families pass through, and any value the caller
+    // set on the request wins (overridable per call).
     transformRequestBody: (body: Record<string, unknown>) =>
       applyQwenSamplingDefaults(body, thinking),
   })
 
-  const createModel = (modelId: string): LanguageModel => {
+  const createModel = (modelId: MixlayerChatModelId): LanguageModel => {
     const resolved = extractMixlayerModelId(modelId)
     // The provider natively emits `reasoning_content`; the middleware handles
     // `<think>` tags so both paths surface as AI SDK reasoning parts.

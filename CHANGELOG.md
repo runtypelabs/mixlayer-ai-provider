@@ -1,1 +1,1 @@
-# mixlayer-ai-provider
+# @runtypelabs/mixlayer-ai-provider

@@ -13,16 +13,16 @@ import {
 } from '../src/index'
 
 describe('extractMixlayerModelId', () => {
-  it('strips the mixlayer/ prefix', () => {
-    expect(extractMixlayerModelId('mixlayer/qwen/qwen3-8b')).toBe('qwen/qwen3-8b')
+  it('strips the mixlayer/ prefix but keeps the org segment', () => {
+    expect(extractMixlayerModelId('mixlayer/qwen/qwen3.5-9b')).toBe('qwen/qwen3.5-9b')
   })
 
   it('strips the mixlayer: prefix (case-insensitive) and trims', () => {
-    expect(extractMixlayerModelId('  Mixlayer:qwen/qwen3-8b ')).toBe('qwen/qwen3-8b')
+    expect(extractMixlayerModelId('  Mixlayer:qwen/qwen3.5-9b ')).toBe('qwen/qwen3.5-9b')
   })
 
   it('returns bare ids unchanged', () => {
-    expect(extractMixlayerModelId('qwen/qwen3-8b')).toBe('qwen/qwen3-8b')
+    expect(extractMixlayerModelId('qwen/qwen3.5-9b')).toBe('qwen/qwen3.5-9b')
   })
 })
 
@@ -39,54 +39,48 @@ describe('getMixlayerSamplingDefaults', () => {
 })
 
 describe('isQwen35Or36', () => {
-  it('matches Qwen 3.5 / 3.6 open-weight ids (dash form, with or without org)', () => {
+  it('matches the Qwen 3.5 / 3.6 catalog ids (dotted, with or without org)', () => {
     for (const id of [
-      'qwen3-5-9b',
-      'qwen3-5-35b-a3b',
-      'qwen3-5-397b-a17b',
-      'qwen3-6-27b',
-      'qwen3-6-35b-a3b',
-      'qwen/qwen3-5-9b',
-      'mixlayer/qwen/qwen3-6-27b',
+      'qwen/qwen3.5-4b-free',
+      'qwen/qwen3.5-9b',
+      'qwen/qwen3.5-27b',
+      'qwen/qwen3.5-35b-a3b',
+      'qwen/qwen3.5-397b-a17b',
+      'qwen/qwen3.6-27b',
+      'qwen/qwen3.6-35b-a3b',
+      'qwen3.5-9b',
+      'mixlayer/qwen/qwen3.6-27b',
     ]) {
       expect(isQwen35Or36(id)).toBe(true)
     }
   })
 
-  it('matches the dotted form too', () => {
-    expect(isQwen35Or36('qwen3.5-9b')).toBe(true)
-    expect(isQwen35Or36('qwen-3.6-27b')).toBe(true)
+  it('tolerates a dash form too', () => {
+    expect(isQwen35Or36('qwen3-5-9b')).toBe(true)
+    expect(isQwen35Or36('qwen3-6-27b')).toBe(true)
   })
 
-  it('does NOT match other Qwen 3 generations', () => {
-    for (const id of [
-      'qwen3-32b', // Qwen3 (3.0) 32B
-      'qwen3-30b-a3b',
-      'qwen3-235b-a22b',
-      'qwen-3-14b',
-      'qwen3-7-max', // 3.7 — future generation
-      'qwen3-7-plus',
-    ]) {
+  it('does NOT match later Qwen generations', () => {
+    for (const id of ['qwen/qwen3.7-27b', 'qwen/qwen4-9b', 'qwen3.7-max']) {
       expect(isQwen35Or36(id)).toBe(false)
     }
   })
 
-  it('does NOT mistake a 5B/6B size token for a 3.5/3.6 minor version', () => {
+  it('does NOT match other model families', () => {
+    for (const id of ['kimi-k2-instruct', 'moonshot/kimi-k2', 'gpt-4', 'llama-3.5-8b']) {
+      expect(isQwen35Or36(id)).toBe(false)
+    }
+  })
+
+  it('requires a separator after the minor version (no false positives on size tokens)', () => {
     expect(isQwen35Or36('qwen3-5b')).toBe(false)
-    expect(isQwen35Or36('qwen3-6b')).toBe(false)
     expect(isQwen35Or36('qwen3-50b')).toBe(false)
-  })
-
-  it('does NOT match non-Qwen models', () => {
-    for (const id of ['gpt-4', 'claude-sonnet-4-6', 'llama-3.5-8b', 'gemini-3-flash']) {
-      expect(isQwen35Or36(id)).toBe(false)
-    }
   })
 })
 
 describe('applyQwenSamplingDefaults', () => {
   it('injects the thinking defaults for a Qwen 3.5 / 3.6 model', () => {
-    const out = applyQwenSamplingDefaults({ model: 'qwen3-5-9b', messages: [] })
+    const out = applyQwenSamplingDefaults({ model: 'qwen/qwen3.5-9b', messages: [] })
     expect(out.temperature).toBe(MIXLAYER_THINKING_DEFAULTS.temperature)
     expect(out.top_p).toBe(MIXLAYER_THINKING_DEFAULTS.topP)
     expect(out.top_k).toBe(MIXLAYER_THINKING_DEFAULTS.topK)
@@ -96,24 +90,22 @@ describe('applyQwenSamplingDefaults', () => {
   })
 
   it('injects the non-thinking defaults (enable_thinking: false) when thinking=false', () => {
-    const out = applyQwenSamplingDefaults({ model: 'qwen3-6-27b', messages: [] }, false)
+    const out = applyQwenSamplingDefaults({ model: 'qwen/qwen3.6-27b', messages: [] }, false)
     expect(out.temperature).toBe(MIXLAYER_NON_THINKING_DEFAULTS.temperature)
     expect(out.chat_template_kwargs).toEqual({ enable_thinking: false })
   })
 
   it('lets caller-set request values override the defaults', () => {
-    const out = applyQwenSamplingDefaults({ model: 'qwen3-5-9b', temperature: 0, top_p: 0.1 })
+    const out = applyQwenSamplingDefaults({ model: 'qwen/qwen3.5-9b', temperature: 0, top_p: 0.1 })
     expect(out.temperature).toBe(0)
     expect(out.top_p).toBe(0.1)
   })
 
-  it('leaves future-Qwen and non-Qwen models untouched', () => {
-    const future = { model: 'qwen3-7-max', messages: [] }
+  it('leaves later-Qwen and other-family models untouched', () => {
+    const future = { model: 'qwen/qwen3.7-27b', messages: [] }
     expect(applyQwenSamplingDefaults(future)).toBe(future)
-    const other = { model: 'gpt-4', messages: [] }
-    expect(applyQwenSamplingDefaults(other)).toBe(other)
-    const sizeToken = { model: 'qwen3-5b', messages: [] }
-    expect(applyQwenSamplingDefaults(sizeToken)).toBe(sizeToken)
+    const kimi = { model: 'kimi-k2-instruct', messages: [] }
+    expect(applyQwenSamplingDefaults(kimi)).toBe(kimi)
   })
 })
 
@@ -157,7 +149,7 @@ describe('createMixlayer', () => {
 
   it('builds a wrapped language model for a prefixed id', () => {
     const provider = createMixlayer({ apiKey: 'test' })
-    const model = provider('mixlayer/qwen/qwen3-8b')
+    const model = provider('mixlayer/qwen/qwen3.5-9b')
     expect(model).toBeDefined()
     // wrapLanguageModel produces a spec-versioned language model
     expect((model as { specificationVersion?: string }).specificationVersion).toMatch(/^v\d+$/)
@@ -165,13 +157,13 @@ describe('createMixlayer', () => {
 
   it('the default provider instance is usable', () => {
     expect(typeof mixlayer).toBe('function')
-    expect(mixlayer('qwen/qwen3-8b')).toBeDefined()
+    expect(mixlayer('qwen/qwen3.5-9b')).toBeDefined()
   })
 
   it('exposes a text-embedding model (registry-compatible shape)', () => {
     const provider = createMixlayer({ apiKey: 'test' })
     expect(typeof provider.textEmbeddingModel).toBe('function')
-    const embedding = provider.textEmbeddingModel('qwen3-embedding-8b')
+    const embedding = provider.textEmbeddingModel('text-embedding')
     expect(embedding).toBeDefined()
     expect((embedding as { specificationVersion?: string }).specificationVersion).toMatch(/^v\d+$/)
   })
