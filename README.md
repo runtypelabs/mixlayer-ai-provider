@@ -161,4 +161,4 @@ Publishing requires an `NPM_TOKEN` repository secret with publish rights to the
 
 ## License
 
-[MIT](./LICENSE) © Runtype Labs
+[MIT](./LICENSE)
