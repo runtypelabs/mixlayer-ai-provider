@@ -1,0 +1,70 @@
+{
+  "name": "mixlayer-ai-provider",
+  "version": "0.1.0",
+  "description": "AI SDK (Vercel) provider for Mixlayer — the open-weight Qwen inference API served over an OpenAI-compatible endpoint.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.47"
+  },
+  "peerDependencies": {
+    "ai": "^6.0.0"
+  },
+  "devDependencies": {
+    "ai": "6.0.188",
+    "tsup": "^8.0.2",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.0"
+  },
+  "keywords": [
+    "ai",
+    "ai-sdk",
+    "vercel-ai-sdk",
+    "mixlayer",
+    "qwen",
+    "llm",
+    "provider",
+    "openai-compatible"
+  ],
+  "author": "Runtype Labs",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/runtypelabs/mixlayer-ai-provider.git"
+  },
+  "homepage": "https://github.com/runtypelabs/mixlayer-ai-provider#readme",
+  "bugs": {
+    "url": "https://github.com/runtypelabs/mixlayer-ai-provider/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "sideEffects": false
+}
