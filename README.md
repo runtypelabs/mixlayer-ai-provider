@@ -107,20 +107,6 @@ const provider = createMixlayer({
 })
 ```
 
-### Embeddings
-
-If your Mixlayer deployment exposes an OpenAI-compatible `/embeddings` endpoint,
-use a Qwen embedding model:
-
-```ts
-import { embed } from 'ai'
-
-const { embedding } = await embed({
-  model: provider.textEmbeddingModel('text-embedding'),
-  value: 'hello world',
-})
-```
-
 ### Provider registry
 
 The provider implements the AI SDK provider shape, so it slots into
@@ -146,7 +132,7 @@ const model = registry.languageModel('mixlayer:qwen/qwen3.6-27b')
 | `applyQwenSamplingDefaults(body, thinking?)`                   | Applies the defaults to a request body, scoped to Qwen 3.5 / 3.6 |
 
 The provider also exposes `provider.languageModel(id)` / `provider.chatModel(id)`
-(equivalent to calling `provider(id)`) and `provider.textEmbeddingModel(id)`.
+(equivalent to calling `provider(id)`).
 | `MIXLAYER_DEFAULT_BASE_URL`                                    | `https://models.mixlayer.ai/v1`                                  |
 | `MIXLAYER_THINKING_DEFAULTS` / `MIXLAYER_NON_THINKING_DEFAULTS` | The raw sampling-default objects                                 |
 

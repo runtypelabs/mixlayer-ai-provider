@@ -15,6 +15,6 @@ endpoint.
   generations (`isQwen35Or36`) and overridable per request; later Qwen
   generations and other model families pass through untouched. The provider is
   model-family-agnostic, leaving room for non-Qwen families (e.g. Kimi).
-- `MixlayerChatModelId` autocomplete for the current catalog (open union), and a
-  `textEmbeddingModel` passthrough so the provider works with
-  `createProviderRegistry`.
+- `MixlayerChatModelId` autocomplete for the current catalog (open union). Works
+  with `createProviderRegistry` for language models (Mixlayer is
+  text-generation only today — no embedding models).

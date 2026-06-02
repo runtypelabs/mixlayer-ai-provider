@@ -31,12 +31,7 @@
 //   const provider = createMixlayer({ apiKey, thinking: false })
 
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import {
-  wrapLanguageModel,
-  extractReasoningMiddleware,
-  type LanguageModel,
-  type EmbeddingModel,
-} from 'ai'
+import { wrapLanguageModel, extractReasoningMiddleware, type LanguageModel } from 'ai'
 
 /** Default Mixlayer OpenAI-compatible inference endpoint. */
 export const MIXLAYER_DEFAULT_BASE_URL = 'https://models.mixlayer.ai/v1'
@@ -234,18 +229,13 @@ export type MixlayerChatModelId =
 
 /**
  * A Mixlayer provider. Callable directly (`mixlayer(modelId)`) and via the
- * standard AI SDK accessors. Shaped to work with `createProviderRegistry`.
+ * standard AI SDK accessors. Works with `createProviderRegistry` for language
+ * models. (Mixlayer is text-generation only today — no embedding models.)
  */
 export interface MixlayerProvider {
   (modelId: MixlayerChatModelId): LanguageModel
   languageModel(modelId: MixlayerChatModelId): LanguageModel
   chatModel(modelId: MixlayerChatModelId): LanguageModel
-  /**
-   * A text-embedding model, if your Mixlayer deployment exposes an
-   * OpenAI-compatible `/embeddings` endpoint. Family sampling defaults never
-   * apply to embeddings.
-   */
-  textEmbeddingModel(modelId: string): EmbeddingModel
 }
 
 /**
@@ -283,8 +273,6 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
   const provider = ((modelId: string) => createModel(modelId)) as MixlayerProvider
   provider.languageModel = createModel
   provider.chatModel = createModel
-  provider.textEmbeddingModel = (modelId: string) =>
-    openaiCompatible.embeddingModel(extractMixlayerModelId(modelId))
   return provider
 }
 
