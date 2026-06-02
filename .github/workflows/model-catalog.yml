@@ -1,0 +1,36 @@
+name: Model Catalog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 15 * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'src/mixlayer-provider.ts'
+      - 'scripts/validate-model-list.mjs'
+      - '.github/workflows/model-catalog.yml'
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate Mixlayer model catalog
+        run: pnpm validate:models
+        env:
+          MIXLAYER_API_KEY: ${{ secrets.MIXLAYER_API_KEY }}
