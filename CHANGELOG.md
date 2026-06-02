@@ -1,5 +1,15 @@
 # @runtypelabs/mixlayer-ai-provider
 
+## 0.2.0
+
+### Minor Changes
+
+- 8a52734: Align Qwen sampling defaults with Mixlayer's documented request parameters, use the `thinking` toggle instead of vLLM chat template kwargs, avoid sending unsupported default `min_p`, preserve defaults when AI SDK passes undefined values, and expose `includeUsage` for streaming usage chunks.
+
+### Patch Changes
+
+- e00d7f7: Add live Mixlayer validation tooling, including a configurable model/option matrix runner and a scheduled GitHub Action that compares the live `/models` catalog with the provider autocomplete list.
+
 ## 0.1.1
 
 Initial release. An AI SDK (Vercel) provider for Mixlayer — open-weight model
