@@ -1,5 +1,11 @@
 # @runtypelabs/mixlayer-ai-provider
 
+## 0.2.3
+
+### Patch Changes
+
+- c832d1f: Approve esbuild's install build script via `pnpm-workspace.yaml` (`onlyBuiltDependencies`) so `pnpm install --frozen-lockfile` no longer halts on `ERR_PNPM_IGNORED_BUILDS`.
+
 ## 0.2.2
 
 ### Patch Changes
