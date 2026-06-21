@@ -1,0 +1,4 @@
+# esbuild ships a postinstall that downloads its platform binary; approve it
+# so `pnpm install --frozen-lockfile` doesn't halt on ERR_PNPM_IGNORED_BUILDS.
+onlyBuiltDependencies:
+  - esbuild
