@@ -6,14 +6,17 @@
 // time — so this provider is model-family-agnostic and only layers
 // family-specific sampling defaults on models it recognizes.
 //
-// It wraps `@ai-sdk/openai-compatible` with everything that makes Mixlayer
-// behave correctly out of the box:
+// It wraps `@ai-sdk/openai-compatible` for Chat Completions and
+// `@ai-sdk/openai` for Responses API models with everything that makes
+// Mixlayer behave correctly out of the box:
 //
 //   - the Mixlayer base URL default
-//   - family-specific sampling defaults (currently the Qwen 3.5 / 3.6 defaults,
-//     thinking / non-thinking)
+//   - family-specific Chat Completions sampling defaults (currently the Qwen
+//     3.5 / 3.6 defaults, thinking / non-thinking)
 //   - reasoning middleware that extracts `<think>` tags into AI SDK reasoning
 //     parts (the provider also emits native `reasoning_content`)
+//   - OpenAI Responses API models, which can be paired with
+//     `createMixlayerWebSocketFetch()` for Responses WebSocket streaming
 //   - tolerant model-id handling (strips a leading `mixlayer/` prefix)
 //
 // Usage mirrors any other AI SDK provider:
@@ -30,11 +33,13 @@
 //   const provider = createMixlayer({ apiKey, thinking: false })
 
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
+import { createOpenAI } from '@ai-sdk/openai'
 import { wrapLanguageModel, extractReasoningMiddleware } from 'ai'
+import type { LanguageModelMiddleware } from 'ai'
 import type { LanguageModelV4 } from '@ai-sdk/provider'
+import { MIXLAYER_DEFAULT_BASE_URL } from './constants'
 
-/** Default Mixlayer OpenAI-compatible inference endpoint. */
-export const MIXLAYER_DEFAULT_BASE_URL = 'https://models.mixlayer.ai/v1'
+type MixlayerFetchFunction = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
 /**
  * Recommended Qwen open-weight sampling defaults. These are the same across the
@@ -157,6 +162,74 @@ function resolveMixlayerApiKey(explicit?: string): string | undefined {
   return undefined
 }
 
+function getHeaderValue(
+  headers: Record<string, string> | undefined,
+  name: string
+): string | undefined {
+  const lowerName = name.toLowerCase()
+  for (const [key, value] of Object.entries(headers ?? {})) {
+    if (key.toLowerCase() === lowerName) return value
+  }
+  return undefined
+}
+
+function resolveOpenAIResponsesApiKey(settings: MixlayerProviderSettings): string {
+  // `@ai-sdk/openai` normally falls back to OPENAI_API_KEY when apiKey is
+  // undefined. Mixlayer must never silently use an OpenAI key, so provide an
+  // empty string when no Mixlayer key is configured.
+  return resolveMixlayerApiKey(settings.apiKey) ?? ''
+}
+
+function createOpenAIResponsesFetch(
+  settings: MixlayerProviderSettings
+): MixlayerFetchFunction | undefined {
+  const authorization = getHeaderValue(settings.headers, 'authorization')
+  if (!authorization) return settings.fetch
+
+  const fetchImplementation = settings.fetch ?? globalThis.fetch.bind(globalThis)
+  return (input, init) => {
+    const headers = new Headers(init?.headers)
+    headers.set('Authorization', authorization)
+    return fetchImplementation(input, { ...init, headers })
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function createResponsesThinkingMiddleware(thinking: boolean): LanguageModelMiddleware {
+  return {
+    transformParams: async ({ params, model }) => {
+      if (thinking || !isQwen35Or36(model.modelId)) return params
+
+      const openaiOptions = isRecord(params.providerOptions?.openai)
+        ? params.providerOptions.openai
+        : {}
+
+      if (openaiOptions.reasoningEffort != null || openaiOptions.reasoning != null) {
+        return params
+      }
+
+      return {
+        ...params,
+        providerOptions: {
+          ...params.providerOptions,
+          openai: {
+            ...openaiOptions,
+            // Mixlayer's Responses API rejects the Chat Completions-only
+            // `thinking` field, but accepts the OpenAI Responses reasoning
+            // object. Force reasoning mode because Mixlayer model ids are not in
+            // @ai-sdk/openai's built-in OpenAI reasoning-model allowlist.
+            forceReasoning: true,
+            reasoningEffort: 'none',
+          },
+        },
+      }
+    },
+  }
+}
+
 /** Settings for {@link createMixlayer}. */
 export interface MixlayerProviderSettings {
   /**
@@ -169,15 +242,27 @@ export interface MixlayerProviderSettings {
   /** Extra headers to send with every request. */
   headers?: Record<string, string>
   /** Custom fetch implementation (e.g. an instrumented or proxied fetch). */
-  fetch?: typeof fetch
+  fetch?: MixlayerFetchFunction
   /** Include usage information in streaming responses. */
   includeUsage?: boolean
   /**
    * Whether to apply the Qwen *thinking* sampling defaults. When `false`, the
-   * non-thinking defaults are used (including `thinking: false`).
+   * non-thinking Chat Completions defaults are used (including
+   * `thinking: false`). Responses API Qwen 3.5 / 3.6 models use
+   * `reasoning.effort: "none"` instead because `/responses` rejects the
+   * Chat Completions-only `thinking` field.
    * Defaults to `true` — Qwen thinks by default.
    */
   thinking?: boolean
+  /**
+   * Which API backs the callable provider and `languageModel(id)`.
+   *
+   * Defaults to `chat` for backwards compatibility. Use `responses` to make
+   * `provider(id)` and provider registries create Responses API models. The
+   * explicit `provider.chat(id)` and `provider.responses(id)` accessors are
+   * always available regardless of this setting.
+   */
+  defaultModelApi?: 'chat' | 'responses'
 }
 
 /**
@@ -198,6 +283,12 @@ export type MixlayerChatModelId =
   // eslint-disable-next-line @typescript-eslint/ban-types -- open-union autocomplete idiom
   | (string & {})
 
+/** Alias for model ids accepted by Mixlayer Responses API accessors. */
+export type MixlayerResponsesModelId = MixlayerChatModelId
+
+/** Alias for any Mixlayer language model id accepted by this provider. */
+export type MixlayerLanguageModelId = MixlayerChatModelId
+
 /**
  * A Mixlayer provider. Callable directly (`mixlayer(modelId)`) and via the
  * standard AI SDK accessors. Works with `createProviderRegistry` for language
@@ -206,21 +297,31 @@ export type MixlayerChatModelId =
 export interface MixlayerProvider {
   (modelId: MixlayerChatModelId): LanguageModelV4
   languageModel(modelId: MixlayerChatModelId): LanguageModelV4
+  /** Creates a Chat Completions API model. */
+  chat(modelId: MixlayerChatModelId): LanguageModelV4
+  /** Creates a Responses API model. Pair with `createMixlayerWebSocketFetch()` for WebSocket mode. */
+  responses(modelId: MixlayerChatModelId): LanguageModelV4
   chatModel(modelId: MixlayerChatModelId): LanguageModelV4
+  responsesModel(modelId: MixlayerChatModelId): LanguageModelV4
 }
 
 /**
- * Creates a Mixlayer provider backed by `@ai-sdk/openai-compatible`, with the
- * Qwen sampling defaults baked into the request body (scoped to Qwen 3.5 / 3.6)
- * and `<think>`-tag reasoning extraction wrapped around every chat model.
+ * Creates a Mixlayer provider backed by `@ai-sdk/openai-compatible` for Chat
+ * Completions and `@ai-sdk/openai` for Responses API models. Chat Completions
+ * models get Qwen sampling defaults baked into the request body (scoped to Qwen
+ * 3.5 / 3.6). Responses API models use the OpenAI-compatible request shape so
+ * they work with Mixlayer's Responses HTTP and WebSocket endpoints; for Qwen
+ * 3.5 / 3.6, `thinking: false` maps to `reasoning.effort: "none"`. Both model
+ * types are wrapped with `<think>`-tag reasoning extraction.
  */
 export function createMixlayer(settings: MixlayerProviderSettings = {}): MixlayerProvider {
   const thinking = settings.thinking ?? true
+  const baseURL = settings.baseURL ?? MIXLAYER_DEFAULT_BASE_URL
 
   const openaiCompatible = createOpenAICompatible({
     name: 'mixlayer',
     apiKey: resolveMixlayerApiKey(settings.apiKey),
-    baseURL: settings.baseURL ?? MIXLAYER_DEFAULT_BASE_URL,
+    baseURL,
     headers: settings.headers,
     fetch: settings.fetch,
     includeUsage: settings.includeUsage,
@@ -231,19 +332,50 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
       applyQwenSamplingDefaults(body, thinking),
   })
 
-  const createModel = (modelId: MixlayerChatModelId): LanguageModelV4 => {
+  const openaiResponses = createOpenAI({
+    name: 'mixlayer',
+    apiKey: resolveOpenAIResponsesApiKey(settings),
+    baseURL,
+    headers: settings.headers,
+    fetch: createOpenAIResponsesFetch(settings),
+  })
+
+  const wrapWithReasoning = (model: LanguageModelV4): LanguageModelV4 =>
+    wrapLanguageModel({
+      model,
+      middleware: extractReasoningMiddleware({ tagName: 'think' }),
+    })
+
+  const wrapResponsesModel = (model: LanguageModelV4): LanguageModelV4 =>
+    wrapLanguageModel({
+      model,
+      middleware: [
+        createResponsesThinkingMiddleware(thinking),
+        extractReasoningMiddleware({ tagName: 'think' }),
+      ],
+    })
+
+  const createChatModel = (modelId: MixlayerChatModelId): LanguageModelV4 => {
     const resolved = extractMixlayerModelId(modelId)
     // The provider natively emits `reasoning_content`; the middleware handles
     // `<think>` tags so both paths surface as AI SDK reasoning parts.
-    return wrapLanguageModel({
-      model: openaiCompatible.chatModel(resolved),
-      middleware: extractReasoningMiddleware({ tagName: 'think' }),
-    })
+    return wrapWithReasoning(openaiCompatible.chatModel(resolved))
   }
 
-  const provider = ((modelId: string) => createModel(modelId)) as MixlayerProvider
-  provider.languageModel = createModel
-  provider.chatModel = createModel
+  const createResponsesModel = (modelId: MixlayerChatModelId): LanguageModelV4 => {
+    const resolved = extractMixlayerModelId(modelId)
+    return wrapResponsesModel(openaiResponses.responses(resolved))
+  }
+
+  const createDefaultModel =
+    settings.defaultModelApi === 'responses' ? createResponsesModel : createChatModel
+
+  const provider = ((modelId: string) => createDefaultModel(modelId)) as MixlayerProvider
+  provider.languageModel = createDefaultModel
+  provider.chat = createChatModel
+  provider.responses = createResponsesModel
+  provider.chatModel = createChatModel
+  provider.responsesModel = createResponsesModel
   return provider
 }
 
