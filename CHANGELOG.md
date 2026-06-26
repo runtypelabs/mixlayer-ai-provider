@@ -1,5 +1,11 @@
 # @runtypelabs/mixlayer-ai-provider
 
+## 1.1.1
+
+### Patch Changes
+
+- 1350a0d: Forward AI SDK User-Agent headers into Responses WebSocket handshakes while keeping explicit WebSocket headers overridable.
+
 ## 1.1.0
 
 ### Minor Changes
