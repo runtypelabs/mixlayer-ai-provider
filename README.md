@@ -22,9 +22,10 @@ and bakes in everything Mixlayer needs to behave correctly out of the box:
 ## Install
 
 ```bash
-pnpm add @runtypelabs/mixlayer-ai-provider ai
+pnpm add @runtypelabs/mixlayer-ai-provider ai@^7
 ```
 
+This package targets AI SDK v7, requires Node.js 22+, and is ESM-only.
 `ai` is a peer dependency, so your app dedupes a single AI SDK version.
 
 ## Usage
