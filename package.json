@@ -1,6 +1,6 @@
 {
   "name": "@runtypelabs/mixlayer-ai-provider",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "AI SDK (Vercel) provider for Mixlayer — open-weight model inference (currently the Qwen 3.5 / 3.6 family) over an OpenAI-compatible endpoint.",
   "type": "module",
   "main": "./dist/index.mjs",
