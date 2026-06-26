@@ -33,7 +33,8 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@ai-sdk/openai-compatible": "^3.0.0"
+    "@ai-sdk/openai-compatible": "^3.0.0",
+    "@ai-sdk/provider": "^4.0.0"
   },
   "peerDependencies": {
     "ai": "^7.0.0"

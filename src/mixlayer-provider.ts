@@ -30,7 +30,8 @@
 //   const provider = createMixlayer({ apiKey, thinking: false })
 
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { wrapLanguageModel, extractReasoningMiddleware, type LanguageModel } from 'ai'
+import { wrapLanguageModel, extractReasoningMiddleware } from 'ai'
+import type { LanguageModelV4 } from '@ai-sdk/provider'
 
 /** Default Mixlayer OpenAI-compatible inference endpoint. */
 export const MIXLAYER_DEFAULT_BASE_URL = 'https://models.mixlayer.ai/v1'
@@ -203,9 +204,9 @@ export type MixlayerChatModelId =
  * models. (Mixlayer is text-generation only today — no embedding models.)
  */
 export interface MixlayerProvider {
-  (modelId: MixlayerChatModelId): LanguageModel
-  languageModel(modelId: MixlayerChatModelId): LanguageModel
-  chatModel(modelId: MixlayerChatModelId): LanguageModel
+  (modelId: MixlayerChatModelId): LanguageModelV4
+  languageModel(modelId: MixlayerChatModelId): LanguageModelV4
+  chatModel(modelId: MixlayerChatModelId): LanguageModelV4
 }
 
 /**
@@ -230,7 +231,7 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
       applyQwenSamplingDefaults(body, thinking),
   })
 
-  const createModel = (modelId: MixlayerChatModelId): LanguageModel => {
+  const createModel = (modelId: MixlayerChatModelId): LanguageModelV4 => {
     const resolved = extractMixlayerModelId(modelId)
     // The provider natively emits `reasoning_content`; the middleware handles
     // `<think>` tags so both paths surface as AI SDK reasoning parts.
