@@ -1,54 +1,5 @@
+import { generateText } from 'ai'
 import { describe, it, expect, vi } from 'vitest'
-
-const wsMock = vi.hoisted(() => ({
-  instances: [] as Array<{
-    url: string
-    options: { headers?: Record<string, string> }
-    readyState: number
-    sent: string[]
-    send(data: string, callback?: (error?: Error) => void): void
-    close(): void
-    emit(event: string, ...args: unknown[]): boolean
-  }>,
-}))
-
-vi.mock('ws', async () => {
-  const { EventEmitter } = await import('node:events')
-
-  class MockWebSocket extends EventEmitter {
-    static CONNECTING = 0
-    static OPEN = 1
-    static CLOSING = 2
-    static CLOSED = 3
-
-    readyState = MockWebSocket.CONNECTING
-    sent: string[] = []
-
-    constructor(
-      readonly url: string,
-      readonly options: { headers?: Record<string, string> } = {}
-    ) {
-      super()
-      wsMock.instances.push(this)
-      queueMicrotask(() => {
-        this.readyState = MockWebSocket.OPEN
-        this.emit('open')
-      })
-    }
-
-    send(data: string, callback?: (error?: Error) => void) {
-      this.sent.push(data)
-      callback?.()
-    }
-
-    close() {
-      this.readyState = MockWebSocket.CLOSED
-      this.emit('close')
-    }
-  }
-
-  return { default: MockWebSocket }
-})
 
 import {
   createMixlayer,
@@ -64,7 +15,68 @@ import {
   MIXLAYER_RESPONSES_WEBSOCKET_BETA,
   MIXLAYER_THINKING_DEFAULTS,
   MIXLAYER_NON_THINKING_DEFAULTS,
+  type MixlayerWebSocketConnectOptions,
+  type MixlayerWebSocketConnection,
 } from '../src/index'
+
+class MockWebSocketConnection extends EventTarget implements MixlayerWebSocketConnection {
+  readyState = 1
+  binaryType: BinaryType = 'blob'
+  sent: string[] = []
+  closed = false
+  accepted = false
+
+  constructor(
+    readonly url = 'wss://models.mixlayer.ai/v1/responses',
+    readonly headers: Record<string, string> = {}
+  ) {
+    super()
+  }
+
+  send(data: string) {
+    this.sent.push(data)
+  }
+
+  close() {
+    this.closed = true
+    this.readyState = 3
+    this.dispatchEvent(new Event('close'))
+  }
+
+  accept() {
+    this.accepted = true
+  }
+
+  emitMessage(data: unknown) {
+    const event = new Event('message') as Event & { data: unknown }
+    Object.defineProperty(event, 'data', { value: data })
+    this.dispatchEvent(event)
+  }
+}
+
+function createWebSocketResponse(connection: MockWebSocketConnection): Response {
+  const response = new Response(null) as Response & {
+    webSocket?: MixlayerWebSocketConnection
+  }
+  Object.defineProperty(response, 'webSocket', { value: connection })
+  return response
+}
+
+function createResponsesSuccessBody(text = 'ok') {
+  return {
+    id: 'resp_1',
+    model: 'qwen/qwen3.5-4b-free',
+    output: [
+      {
+        type: 'message',
+        id: 'msg_1',
+        role: 'assistant',
+        content: [{ type: 'output_text', text, annotations: [] }],
+      },
+    ],
+    usage: { input_tokens: 1, output_tokens: 1 },
+  }
+}
 
 describe('extractMixlayerModelId', () => {
   it('strips the mixlayer/ prefix but keeps the org segment', () => {
@@ -214,6 +226,27 @@ describe('createMixlayer', () => {
     )
   })
 
+  it('preserves a custom Responses Authorization header on outbound requests', async () => {
+    const authorizations: Array<string | null> = []
+    const provider = createMixlayer({
+      headers: { Authorization: 'Bearer real-mixlayer-token' },
+      fetch: async (_input, init) => {
+        authorizations.push(new Headers(init?.headers).get('authorization'))
+        return new Response(JSON.stringify(createResponsesSuccessBody()), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    const result = await generateText({
+      model: provider.responses('qwen/qwen3.5-4b-free'),
+      prompt: 'Say ok',
+    })
+
+    expect(result.text).toBe('ok')
+    expect(authorizations).toEqual(['Bearer real-mixlayer-token'])
+  })
+
   it('the default provider instance is usable', () => {
     expect(typeof mixlayer).toBe('function')
     expect(mixlayer('qwen/qwen3.5-9b')).toBeDefined()
@@ -244,9 +277,14 @@ describe('getMixlayerResponsesWebSocketURL', () => {
 
 describe('createMixlayerWebSocketFetch', () => {
   it('routes streaming Responses API requests through a response.create WebSocket event', async () => {
-    wsMock.instances.length = 0
+    const connections: MockWebSocketConnection[] = []
     const wsFetch = createMixlayerWebSocketFetch({
-      url: 'ws://127.0.0.1:8787/v1/responses',
+      url: 'wss://127.0.0.1:8787/v1/responses',
+      connect: async ({ url, headers }: MixlayerWebSocketConnectOptions) => {
+        const connection = new MockWebSocketConnection(url, headers)
+        connections.push(connection)
+        return connection
+      },
     })
 
     try {
@@ -261,13 +299,13 @@ describe('createMixlayerWebSocketFetch', () => {
         }),
       })
 
-      await vi.waitFor(() => expect(wsMock.instances).toHaveLength(1))
-      const socket = wsMock.instances[0]
+      await vi.waitFor(() => expect(connections).toHaveLength(1))
+      const socket = connections[0]
       await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
 
-      expect(socket.url).toBe('ws://127.0.0.1:8787/v1/responses')
-      expect(socket.options.headers?.Authorization).toBe('Bearer test-key')
-      expect(socket.options.headers?.['OpenAI-Beta']).toBe(MIXLAYER_RESPONSES_WEBSOCKET_BETA)
+      expect(socket.url).toBe('wss://127.0.0.1:8787/v1/responses')
+      expect(socket.headers.Authorization).toBe('Bearer test-key')
+      expect(socket.headers['OpenAI-Beta']).toBe(MIXLAYER_RESPONSES_WEBSOCKET_BETA)
       expect(JSON.parse(socket.sent[0]) as unknown).toEqual({
         type: 'response.create',
         model: 'qwen/qwen3.5-9b',
@@ -275,18 +313,53 @@ describe('createMixlayerWebSocketFetch', () => {
         store: false,
       })
 
-      socket.emit(
-        'message',
-        Buffer.from(JSON.stringify({ type: 'response.output_text.delta', delta: 'hi' }))
-      )
-      socket.emit(
-        'message',
-        Buffer.from(JSON.stringify({ type: 'response.completed', response: { id: 'resp_1' } }))
-      )
+      socket.emitMessage(JSON.stringify({ type: 'response.output_text.delta', delta: 'hi' }))
+      socket.emitMessage(JSON.stringify({ type: 'response.completed', response: { id: 'resp_1' } }))
 
       const text = await response.text()
       expect(text).toContain('data: {"type":"response.output_text.delta","delta":"hi"}')
       expect(text).toContain('data: [DONE]')
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('uses fetch WebSocket upgrades by default for Workers-compatible runtimes', async () => {
+    const connection = new MockWebSocketConnection()
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = []
+    const wsFetch = createMixlayerWebSocketFetch({
+      url: 'wss://models.mixlayer.ai/v1/responses',
+      fetch: async (input, init) => {
+        calls.push({ input, init })
+        return createWebSocketResponse(connection)
+      },
+    })
+
+    try {
+      const response = await wsFetch('https://models.mixlayer.ai/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer test-key' },
+        body: JSON.stringify({
+          model: 'qwen/qwen3.5-9b',
+          input: 'hello',
+          stream: true,
+          store: false,
+        }),
+      })
+
+      await vi.waitFor(() => expect(connection.sent).toHaveLength(1))
+      expect(calls).toHaveLength(1)
+      expect(calls[0].input).toBe('https://models.mixlayer.ai/v1/responses')
+      expect(new Headers(calls[0].init?.headers).get('upgrade')).toBe('websocket')
+      expect(new Headers(calls[0].init?.headers).get('authorization')).toBe('Bearer test-key')
+      expect(new Headers(calls[0].init?.headers).get('openai-beta')).toBe(
+        MIXLAYER_RESPONSES_WEBSOCKET_BETA
+      )
+      expect(connection.accepted).toBe(true)
+      expect(connection.binaryType).toBe('arraybuffer')
+
+      connection.emitMessage(JSON.stringify({ type: 'response.completed', response: { id: 'resp_1' } }))
+      expect(await response.text()).toContain('data: [DONE]')
     } finally {
       wsFetch.close()
     }
@@ -304,5 +377,58 @@ describe('createMixlayerWebSocketFetch', () => {
 
     expect(response.status).toBe(201)
     expect(await response.text()).toBe('fallback-ok')
+  })
+
+  it('closes and rejects a socket that resolves after close() during handshake', async () => {
+    let resolveConnect!: (connection: MockWebSocketConnection) => void
+    const connect = vi.fn(
+      () =>
+        new Promise<MixlayerWebSocketConnection>(resolve => {
+          resolveConnect = resolve
+        })
+    )
+    const wsFetch = createMixlayerWebSocketFetch({ connect })
+
+    const responsePromise = wsFetch('https://models.mixlayer.ai/v1/responses', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-key' },
+      body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+    })
+
+    await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(1))
+    const connection = new MockWebSocketConnection()
+    wsFetch.close()
+    resolveConnect(connection)
+
+    await expect(responsePromise).rejects.toThrow(/WebSocket closed|AbortError/)
+    expect(connection.closed).toBe(true)
+  })
+
+  it('releases the request queue after a connection failure', async () => {
+    let calls = 0
+    const connection = new MockWebSocketConnection()
+    const wsFetch = createMixlayerWebSocketFetch({
+      connect: async () => {
+        calls++
+        if (calls === 1) throw new Error('connect failed')
+        return connection
+      },
+    })
+
+    const requestInit = {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-key' },
+      body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+    }
+
+    await expect(
+      wsFetch('https://models.mixlayer.ai/v1/responses', requestInit)
+    ).rejects.toThrow('connect failed')
+
+    const response = await wsFetch('https://models.mixlayer.ai/v1/responses', requestInit)
+    connection.emitMessage(JSON.stringify({ type: 'response.completed', response: { id: 'resp_1' } }))
+
+    expect(calls).toBe(2)
+    expect(await response.text()).toContain('data: [DONE]')
   })
 })

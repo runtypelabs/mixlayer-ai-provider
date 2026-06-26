@@ -8,9 +8,9 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
-  // AI SDK packages and ws are runtime dependencies — keep them external so a
-  // single provider/transport stack is deduped by the host app.
-  external: ['ai', '@ai-sdk/openai-compatible', '@ai-sdk/openai', 'ws'],
+  // AI SDK packages are runtime dependencies — keep them external so a single
+  // provider stack is deduped by the host app.
+  external: ['ai', '@ai-sdk/openai-compatible', '@ai-sdk/openai'],
   outExtension() {
     return { js: '.mjs' }
   },

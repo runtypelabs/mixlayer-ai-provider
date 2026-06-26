@@ -1,8 +1,28 @@
-import WebSocket, { type RawData } from 'ws'
 import {
   MIXLAYER_RESPONSES_WEBSOCKET_BETA,
   getMixlayerResponsesWebSocketURL,
 } from './constants'
+
+export interface MixlayerWebSocketConnection {
+  readyState?: number
+  binaryType?: BinaryType
+  send(data: string): void | Promise<void>
+  close(code?: number, reason?: string): void
+  addEventListener(type: 'message' | 'error' | 'close', listener: (event: Event) => void): void
+  removeEventListener(type: 'message' | 'error' | 'close', listener: (event: Event) => void): void
+  /** Cloudflare Workers fetch-upgrade WebSockets must be accepted before use. */
+  accept?: (options?: { allowHalfOpen?: boolean }) => void
+}
+
+export interface MixlayerWebSocketConnectOptions {
+  url: string
+  headers: Record<string, string>
+  signal?: AbortSignal
+}
+
+export type MixlayerWebSocketConnector = (
+  options: MixlayerWebSocketConnectOptions
+) => Promise<MixlayerWebSocketConnection>
 
 export interface MixlayerWebSocketFetchOptions {
   /**
@@ -24,11 +44,20 @@ export interface MixlayerWebSocketFetchOptions {
   betaHeader?: string | false
   /** Fallback fetch for non-streaming or non-Responses requests. */
   fetch?: typeof fetch
+  /**
+   * Custom WebSocket connector. The default uses `fetch()` with
+   * `Upgrade: websocket`, which is supported by Cloudflare Workers.
+   */
+  connect?: MixlayerWebSocketConnector
 }
 
 export type MixlayerWebSocketFetch = typeof fetch & {
-  /** Close the underlying WebSocket connection, if one is open. */
+  /** Close the underlying WebSocket connection, if one is open or connecting. */
   close(): void
+}
+
+type WebSocketUpgradeResponse = Response & {
+  webSocket?: MixlayerWebSocketConnection | null
 }
 
 const TERMINAL_RESPONSE_EVENT_TYPES = new Set([
@@ -46,78 +75,95 @@ const TERMINAL_RESPONSE_EVENT_TYPES = new Set([
  * Non-streaming requests and requests to other endpoints fall back to `fetch`.
  * The WebSocket is opened lazily and reused sequentially, matching the OpenAI
  * Responses WebSocket API's one-in-flight-response-per-connection semantics.
+ *
+ * The default connector uses the Web-standard `fetch()` WebSocket upgrade shape
+ * available in Cloudflare Workers. Runtimes that do not expose
+ * `Response.webSocket` can pass a custom `connect` implementation.
  */
 export function createMixlayerWebSocketFetch(
   options: MixlayerWebSocketFetchOptions = {}
 ): MixlayerWebSocketFetch {
   const wsUrl = options.url ?? getMixlayerResponsesWebSocketURL(options.baseURL)
   const fallbackFetch = options.fetch ?? globalThis.fetch.bind(globalThis)
+  const connect =
+    options.connect ??
+    ((connectOptions: MixlayerWebSocketConnectOptions) =>
+      connectWithFetchUpgrade(connectOptions, fallbackFetch))
 
-  let socket: WebSocket | null = null
-  let connecting: Promise<WebSocket> | null = null
+  let socket: MixlayerWebSocketConnection | null = null
+  let connecting: Promise<MixlayerWebSocketConnection> | null = null
+  let connectAbortController: AbortController | null = null
   let socketHeaderKey: string | null = null
+  let connectionGeneration = 0
   let requestQueue: Promise<void> = Promise.resolve()
 
   function closeCurrentSocket() {
-    const current = socket
-    socket = null
+    connectionGeneration++
+    connectAbortController?.abort(new DOMException('WebSocket closed', 'AbortError'))
+    connectAbortController = null
     connecting = null
     socketHeaderKey = null
-    if (current && current.readyState !== WebSocket.CLOSED) current.close()
+
+    const current = socket
+    socket = null
+    if (current && !isClosed(current)) current.close()
   }
 
-  function getConnection(headers: Record<string, string>): Promise<WebSocket> {
+  async function getConnection(headers: Record<string, string>): Promise<MixlayerWebSocketConnection> {
     const headerKey = stableHeaderKey(headers)
 
-    if (
-      socket?.readyState === WebSocket.OPEN &&
-      socketHeaderKey === headerKey
-    ) {
-      return Promise.resolve(socket)
+    if (socket && !isClosed(socket) && socketHeaderKey === headerKey) {
+      return socket
     }
 
     if (socket && socketHeaderKey !== headerKey) closeCurrentSocket()
 
     if (connecting && socketHeaderKey === headerKey) return connecting
 
+    const generation = connectionGeneration
     socketHeaderKey = headerKey
-    connecting = new Promise((resolve, reject) => {
-      const nextSocket = new WebSocket(wsUrl, { headers })
+    connectAbortController = new AbortController()
 
-      nextSocket.on('open', () => {
-        socket = nextSocket
+    connecting = connect({
+      url: wsUrl,
+      headers,
+      signal: connectAbortController.signal,
+    })
+      .then(nextSocket => {
+        connectAbortController = null
         connecting = null
-        resolve(nextSocket)
-      })
 
-      nextSocket.on('error', error => {
-        if (connecting) {
-          connecting = null
-          reject(error)
+        if (generation !== connectionGeneration) {
+          nextSocket.close()
+          throw new DOMException('WebSocket closed', 'AbortError')
         }
-      })
 
-      nextSocket.on('close', () => {
-        if (socket === nextSocket) {
-          socket = null
+        socket = nextSocket
+        return nextSocket
+      })
+      .catch(error => {
+        if (generation === connectionGeneration) {
+          connectAbortController = null
+          connecting = null
           socketHeaderKey = null
         }
+        throw error
       })
-    })
 
     return connecting
   }
 
   async function websocketFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const url = getRequestURL(input)
-    if (init?.method !== 'POST' || !isResponsesURL(url)) {
+    const method = getRequestMethod(input, init)
+    if (method !== 'POST' || !isResponsesURL(url)) {
       return fallbackFetch(input, init)
     }
 
-    const body = parseJsonBody(init.body)
+    const body = await parseJsonBody(input, init)
     if (body == null || body.stream !== true) return fallbackFetch(input, init)
 
-    const requestHeaders = normalizeHeaders(init.headers)
+    const requestHeaders = normalizeHeaders(getRequestHeaders(input, init))
     const websocketHeaders = buildWebSocketHeaders({
       requestHeaders,
       optionHeaders: options.headers,
@@ -134,7 +180,7 @@ export function createMixlayerWebSocketFetch(
     )
     await releasePreviousRequest
 
-    let connection: WebSocket
+    let connection: MixlayerWebSocketConnection
     try {
       connection = await getConnection(websocketHeaders)
     } catch (error) {
@@ -154,9 +200,9 @@ export function createMixlayerWebSocketFetch(
         function cleanup() {
           if (cleanedUp) return
           cleanedUp = true
-          connection.off('message', onMessage)
-          connection.off('error', onError)
-          connection.off('close', onClose)
+          connection.removeEventListener('message', onMessage)
+          connection.removeEventListener('error', onError)
+          connection.removeEventListener('close', onClose)
           if (abortHandler) init?.signal?.removeEventListener('abort', abortHandler)
           releaseCurrentRequest()
         }
@@ -170,28 +216,29 @@ export function createMixlayerWebSocketFetch(
           }
         }
 
-        function onMessage(data: RawData) {
-          const text = data.toString()
-          controller.enqueue(encoder.encode(`data: ${text}\n\n`))
-
+        async function onMessage(event: Event) {
           try {
-            const event = JSON.parse(text) as { type?: unknown }
+            const text = await eventDataToString(getEventData(event))
+            controller.enqueue(encoder.encode(`data: ${text}\n\n`))
+
+            const parsed = JSON.parse(text) as { type?: unknown }
             if (
-              typeof event.type === 'string' &&
-              TERMINAL_RESPONSE_EVENT_TYPES.has(event.type)
+              typeof parsed.type === 'string' &&
+              TERMINAL_RESPONSE_EVENT_TYPES.has(parsed.type)
             ) {
               controller.enqueue(encoder.encode('data: [DONE]\n\n'))
               cleanup()
               closeStream()
             }
-          } catch {
-            // Non-JSON messages are still forwarded as SSE data frames.
+          } catch (error) {
+            cleanup()
+            controller.error(error)
           }
         }
 
-        function onError(error: Error) {
+        function onError(event: Event) {
           cleanup()
-          controller.error(error)
+          controller.error(eventToError(event))
         }
 
         function onClose() {
@@ -199,9 +246,9 @@ export function createMixlayerWebSocketFetch(
           closeStream()
         }
 
-        connection.on('message', onMessage)
-        connection.on('error', onError)
-        connection.on('close', onClose)
+        connection.addEventListener('message', onMessage)
+        connection.addEventListener('error', onError)
+        connection.addEventListener('close', onClose)
 
         if (init?.signal) {
           abortHandler = () => {
@@ -223,12 +270,12 @@ export function createMixlayerWebSocketFetch(
           init.signal.addEventListener('abort', abortHandler, { once: true })
         }
 
-        connection.send(
-          JSON.stringify({ type: 'response.create', ...requestBody }),
-          error => {
-            if (error) onError(error)
-          }
-        )
+        Promise.resolve(
+          connection.send(JSON.stringify({ type: 'response.create', ...requestBody }))
+        ).catch(error => {
+          cleanup()
+          controller.error(error)
+        })
       },
       cancel() {
         cleanupStream()
@@ -246,10 +293,52 @@ export function createMixlayerWebSocketFetch(
   })
 }
 
+async function connectWithFetchUpgrade(
+  { url, headers, signal }: MixlayerWebSocketConnectOptions,
+  fetchImplementation: typeof fetch
+): Promise<MixlayerWebSocketConnection> {
+  const response = (await fetchImplementation(getFetchUpgradeURL(url), {
+    method: 'GET',
+    headers: {
+      ...headers,
+      Upgrade: 'websocket',
+    },
+    signal,
+  })) as WebSocketUpgradeResponse
+
+  if (!response.webSocket) {
+    throw new Error(
+      'This runtime does not expose Response.webSocket for fetch-based WebSocket upgrades. ' +
+        `Received HTTP ${response.status} from ${getFetchUpgradeURL(url)}. ` +
+        'Pass a custom `connect` option to createMixlayerWebSocketFetch().'
+    )
+  }
+
+  try {
+    response.webSocket.binaryType = 'arraybuffer'
+  } catch {
+    // Some runtimes may expose a read-only binaryType. We can still consume
+    // Blob, ArrayBuffer, and string message payloads below.
+  }
+  response.webSocket.accept?.()
+  return response.webSocket
+}
+
 function getRequestURL(input: RequestInfo | URL): string {
   if (input instanceof URL) return input.toString()
   if (typeof input === 'string') return input
   return input.url
+}
+
+function getRequestMethod(input: RequestInfo | URL, init: RequestInit | undefined): string | undefined {
+  return (init?.method ?? (input instanceof Request ? input.method : undefined))?.toUpperCase()
+}
+
+function getRequestHeaders(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined
+): HeadersInit | undefined {
+  return init?.headers ?? (input instanceof Request ? input.headers : undefined)
 }
 
 function isResponsesURL(url: string): boolean {
@@ -260,7 +349,14 @@ function isResponsesURL(url: string): boolean {
   }
 }
 
-function parseJsonBody(body: BodyInit | null | undefined): Record<string, unknown> | undefined {
+async function parseJsonBody(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined
+): Promise<Record<string, unknown> | undefined> {
+  const body =
+    init?.body ??
+    (input instanceof Request && input.body != null ? await input.clone().text() : undefined)
+
   if (typeof body !== 'string') return undefined
   try {
     const parsed = JSON.parse(body) as unknown
@@ -270,6 +366,13 @@ function parseJsonBody(body: BodyInit | null | undefined): Record<string, unknow
   } catch {
     return undefined
   }
+}
+
+function getFetchUpgradeURL(url: string): string {
+  const upgradeUrl = new URL(url)
+  if (upgradeUrl.protocol === 'wss:') upgradeUrl.protocol = 'https:'
+  else if (upgradeUrl.protocol === 'ws:') upgradeUrl.protocol = 'http:'
+  return upgradeUrl.toString()
 }
 
 function normalizeHeaders(headers: HeadersInit | undefined): Record<string, string> {
@@ -324,4 +427,26 @@ function stableHeaderKey(headers: Record<string, string>): string {
       Object.entries(headers).sort(([left], [right]) => left.localeCompare(right))
     )
   )
+}
+
+function isClosed(connection: MixlayerWebSocketConnection): boolean {
+  return connection.readyState === 2 || connection.readyState === 3
+}
+
+function getEventData(event: Event): unknown {
+  return 'data' in event ? (event as MessageEvent).data : event
+}
+
+async function eventDataToString(data: unknown): Promise<string> {
+  if (typeof data === 'string') return data
+  if (data instanceof ArrayBuffer) return new TextDecoder().decode(data)
+  if (ArrayBuffer.isView(data)) return new TextDecoder().decode(data)
+  if (typeof Blob !== 'undefined' && data instanceof Blob) return data.text()
+  return String(data)
+}
+
+function eventToError(event: Event): Error {
+  if ('error' in event && event.error instanceof Error) return event.error
+  if ('message' in event && typeof event.message === 'string') return new Error(event.message)
+  return new Error('WebSocket error')
 }

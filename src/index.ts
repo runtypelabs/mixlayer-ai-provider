@@ -24,6 +24,9 @@ export {
 
 export {
   createMixlayerWebSocketFetch,
+  type MixlayerWebSocketConnectOptions,
+  type MixlayerWebSocketConnection,
+  type MixlayerWebSocketConnector,
   type MixlayerWebSocketFetch,
   type MixlayerWebSocketFetchOptions,
 } from './mixlayer-websocket-fetch'

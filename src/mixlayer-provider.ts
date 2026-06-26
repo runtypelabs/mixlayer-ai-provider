@@ -162,17 +162,36 @@ function resolveMixlayerApiKey(explicit?: string): string | undefined {
   return undefined
 }
 
-function hasAuthorizationHeader(headers: Record<string, string> | undefined): boolean {
-  return Object.keys(headers ?? {}).some(key => key.toLowerCase() === 'authorization')
+function getHeaderValue(
+  headers: Record<string, string> | undefined,
+  name: string
+): string | undefined {
+  const lowerName = name.toLowerCase()
+  for (const [key, value] of Object.entries(headers ?? {})) {
+    if (key.toLowerCase() === lowerName) return value
+  }
+  return undefined
 }
 
 function resolveOpenAIResponsesApiKey(settings: MixlayerProviderSettings): string {
-  const resolved = resolveMixlayerApiKey(settings.apiKey)
-  if (resolved) return resolved
   // `@ai-sdk/openai` normally falls back to OPENAI_API_KEY when apiKey is
-  // undefined. Mixlayer must never silently use an OpenAI key, so provide a
-  // harmless placeholder. A caller-supplied Authorization header still wins.
-  return hasAuthorizationHeader(settings.headers) ? 'unused' : ''
+  // undefined. Mixlayer must never silently use an OpenAI key, so provide an
+  // empty string when no Mixlayer key is configured.
+  return resolveMixlayerApiKey(settings.apiKey) ?? ''
+}
+
+function createOpenAIResponsesFetch(
+  settings: MixlayerProviderSettings
+): MixlayerFetchFunction | undefined {
+  const authorization = getHeaderValue(settings.headers, 'authorization')
+  if (!authorization) return settings.fetch
+
+  const fetchImplementation = settings.fetch ?? globalThis.fetch.bind(globalThis)
+  return (input, init) => {
+    const headers = new Headers(init?.headers)
+    headers.set('Authorization', authorization)
+    return fetchImplementation(input, { ...init, headers })
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -318,7 +337,7 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
     apiKey: resolveOpenAIResponsesApiKey(settings),
     baseURL,
     headers: settings.headers,
-    fetch: settings.fetch,
+    fetch: createOpenAIResponsesFetch(settings),
   })
 
   const wrapWithReasoning = (model: LanguageModelV4): LanguageModelV4 =>

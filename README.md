@@ -29,8 +29,10 @@ correctly out of the box:
 pnpm add @runtypelabs/mixlayer-ai-provider ai@^7
 ```
 
-This package targets AI SDK v7, requires Node.js 22+, and is ESM-only.
-`ai` is a peer dependency, so your app dedupes a single AI SDK version.
+This package targets AI SDK v7 and is ESM-only. For Node.js applications, use
+Node.js 22+; the package itself avoids Node-only WebSocket dependencies so it
+can be bundled for standards-based runtimes such as Cloudflare Workers. `ai` is
+a peer dependency, so your app dedupes a single AI SDK version.
 
 ## Usage
 
@@ -111,6 +113,18 @@ try {
 }
 ```
 
+`createMixlayerWebSocketFetch()` is designed to be Workers-friendly by default:
+it performs a `fetch()` request with `Upgrade: websocket`, uses
+`Response.webSocket`, and calls `accept()` before sending the `response.create`
+event. That matches Cloudflare Workers' outbound WebSocket API and keeps this
+package free of a hard `ws` / Node.js dependency.
+
+Runtimes that do not expose `Response.webSocket` on upgraded fetch responses
+(for example, typical Node.js fetch implementations) can pass a custom
+`connect` option. Browsers also cannot attach arbitrary `Authorization` headers
+to direct WebSocket handshakes, so browser apps should use a server/Worker
+connector or proxy rather than connecting directly with a secret API key.
+
 If you want provider registries or `provider(id)` to use Responses API models,
 set `defaultModelApi: 'responses'` in `createMixlayer(...)`.
 
@@ -184,6 +198,17 @@ The provider also exposes:
 | `includeUsage`    | `boolean`              | —                           | Include usage information in streaming Chat Completions responses        |
 | `thinking`        | `boolean`              | `true`                      | Apply Qwen thinking/non-thinking defaults; Responses uses `reasoning.effort: 'none'` for `false` |
 | `defaultModelApi` | `'chat' \| 'responses'` | `'chat'`                    | API used by `provider(id)` and `provider.languageModel(id)`              |
+
+### `createMixlayerWebSocketFetch(options)`
+
+| Option       | Type                  | Default                                  | Description                                      |
+| ------------ | --------------------- | ---------------------------------------- | ------------------------------------------------ |
+| `url`        | `string`              | Derived from `baseURL`                   | Responses WebSocket endpoint                     |
+| `baseURL`    | `string`              | `MIXLAYER_DEFAULT_BASE_URL`              | HTTP base URL used to derive `url`               |
+| `headers`    | `Record<string,string>` | —                                      | Extra headers for the WebSocket handshake        |
+| `betaHeader` | `string \| false`     | `MIXLAYER_RESPONSES_WEBSOCKET_BETA`      | OpenAI Responses WebSocket beta header value     |
+| `fetch`      | `typeof fetch`        | `globalThis.fetch`                       | Fallback fetch and default fetch-upgrade client  |
+| `connect`    | WebSocket connector   | Workers-compatible fetch upgrade         | Override for runtimes without `Response.webSocket` |
 
 ## License
 
