@@ -67,23 +67,13 @@ const model = registry.languageModel('mixlayer:qwen/qwen3.6-27b')
 
 ## Models
 
-The current Mixlayer chat catalog (see the
+Pass any model id from Mixlayer's catalog — see the
 [Mixlayer models page](https://docs.mixlayer.com/models) for the live list and
-pricing):
+pricing. Ids look like `qwen/qwen3.6-27b` or `moonshotai/kimi-k2.6`.
 
-| Model id                 |
-| ------------------------ |
-| `qwen/qwen3.5-4b-free`   |
-| `qwen/qwen3.5-9b`        |
-| `qwen/qwen3.5-27b`       |
-| `qwen/qwen3.5-35b-a3b`   |
-| `qwen/qwen3.5-397b-a17b` |
-| `qwen/qwen3.6-27b`       |
-| `qwen/qwen3.6-35b-a3b`   |
-
-These ids power editor autocomplete via the `MixlayerChatModelId` union, but the
-union is open — any model id string is accepted, so new models and future
-non-Qwen families work without a package update.
+The `MixlayerChatModelId` union ships a snapshot of the known ids for editor
+autocomplete, but the union is open — any model id string is accepted, so new
+models and future families work without a package update.
 
 ## Sampling defaults
 

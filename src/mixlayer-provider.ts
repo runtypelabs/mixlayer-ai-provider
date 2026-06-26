@@ -92,7 +92,7 @@ export function getMixlayerSamplingDefaults(thinking: boolean): MixlayerSampling
  * other model families return `false`, so they receive vanilla
  * OpenAI-compatible behavior with no injected defaults.
  *
- * Matches the dotted ids Mixlayer uses (`qwen/qwen3.5-27b`, `qwen/qwen3.6-35b-a3b`),
+ * Matches the dotted ids Mixlayer uses (`qwen/qwen3.5-9b`, `qwen/qwen3.6-35b-a3b`),
  * with or without the `qwen/` org segment, and tolerates a dash form
  * (`qwen3-5-9b`) too. The minor version must be followed by a separator or the
  * end of the id, so a bare size token like `qwen3-5b` is not misread as 3.5.
@@ -188,11 +188,12 @@ export interface MixlayerProviderSettings {
 export type MixlayerChatModelId =
   | 'qwen/qwen3.5-4b-free'
   | 'qwen/qwen3.5-9b'
-  | 'qwen/qwen3.5-27b'
   | 'qwen/qwen3.5-35b-a3b'
   | 'qwen/qwen3.5-397b-a17b'
   | 'qwen/qwen3.6-27b'
   | 'qwen/qwen3.6-35b-a3b'
+  | 'moonshotai/kimi-k2.6'
+  | 'moonshotai/kimi-k2.7-code'
   // eslint-disable-next-line @typescript-eslint/ban-types -- open-union autocomplete idiom
   | (string & {})
 
