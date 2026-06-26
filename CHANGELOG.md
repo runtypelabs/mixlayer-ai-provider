@@ -1,5 +1,11 @@
 # @runtypelabs/mixlayer-ai-provider
 
+## 0.2.4
+
+### Patch Changes
+
+- 752fab8: Sync `MixlayerChatModelId` autocomplete ids with the live Mixlayer catalog: drop the retired `qwen/qwen3.5-27b` and add `moonshotai/kimi-k2.6` and `moonshotai/kimi-k2.7-code`. Also make the README model section generic so it no longer needs updating on every catalog change.
+
 ## 0.2.3
 
 ### Patch Changes
