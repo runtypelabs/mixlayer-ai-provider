@@ -18,6 +18,8 @@ export interface MixlayerWebSocketConnectOptions {
   url: string
   headers: Record<string, string>
   signal?: AbortSignal
+  /** Allows custom connectors to expose a socket before their promise resolves. */
+  onSocket?: (connection: MixlayerWebSocketConnection) => void
 }
 
 export type MixlayerWebSocketConnector = (
@@ -91,6 +93,7 @@ export function createMixlayerWebSocketFetch(
       connectWithFetchUpgrade(connectOptions, fallbackFetch))
 
   let socket: MixlayerWebSocketConnection | null = null
+  let pendingSocket: MixlayerWebSocketConnection | null = null
   let connecting: Promise<MixlayerWebSocketConnection> | null = null
   let connectAbortController: AbortController | null = null
   let socketHeaderKey: string | null = null
@@ -104,8 +107,12 @@ export function createMixlayerWebSocketFetch(
     connecting = null
     socketHeaderKey = null
 
+    const pending = pendingSocket
+    pendingSocket = null
     const current = socket
     socket = null
+
+    if (pending && pending !== current && !isClosed(pending)) pending.close()
     if (current && !isClosed(current)) current.close()
   }
 
@@ -128,13 +135,21 @@ export function createMixlayerWebSocketFetch(
       url: wsUrl,
       headers,
       signal: connectAbortController.signal,
+      onSocket: nextSocket => {
+        if (generation !== connectionGeneration) {
+          if (!isClosed(nextSocket)) nextSocket.close()
+          return
+        }
+        pendingSocket = nextSocket
+      },
     })
       .then(nextSocket => {
         connectAbortController = null
         connecting = null
+        pendingSocket = null
 
         if (generation !== connectionGeneration) {
-          nextSocket.close()
+          if (!isClosed(nextSocket)) nextSocket.close()
           throw new DOMException('WebSocket closed', 'AbortError')
         }
 
@@ -146,6 +161,8 @@ export function createMixlayerWebSocketFetch(
           connectAbortController = null
           connecting = null
           socketHeaderKey = null
+          if (pendingSocket && !isClosed(pendingSocket)) pendingSocket.close()
+          pendingSocket = null
         }
         throw error
       })
@@ -294,7 +311,7 @@ export function createMixlayerWebSocketFetch(
 }
 
 async function connectWithFetchUpgrade(
-  { url, headers, signal }: MixlayerWebSocketConnectOptions,
+  { url, headers, signal, onSocket }: MixlayerWebSocketConnectOptions,
   fetchImplementation: typeof fetch
 ): Promise<MixlayerWebSocketConnection> {
   const response = (await fetchImplementation(getFetchUpgradeURL(url), {
@@ -321,6 +338,7 @@ async function connectWithFetchUpgrade(
     // Blob, ArrayBuffer, and string message payloads below.
   }
   response.webSocket.accept?.()
+  onSocket?.(response.webSocket)
   return response.webSocket
 }
 

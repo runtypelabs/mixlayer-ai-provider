@@ -380,11 +380,14 @@ describe('createMixlayerWebSocketFetch', () => {
   })
 
   it('closes and rejects a socket that resolves after close() during handshake', async () => {
-    let resolveConnect!: (connection: MockWebSocketConnection) => void
+    let resolveConnect!: () => void
+    let pendingConnection!: MockWebSocketConnection
     const connect = vi.fn(
-      () =>
+      ({ onSocket }: MixlayerWebSocketConnectOptions) =>
         new Promise<MixlayerWebSocketConnection>(resolve => {
-          resolveConnect = resolve
+          pendingConnection = new MockWebSocketConnection()
+          onSocket?.(pendingConnection)
+          resolveConnect = () => resolve(pendingConnection)
         })
     )
     const wsFetch = createMixlayerWebSocketFetch({ connect })
@@ -396,12 +399,12 @@ describe('createMixlayerWebSocketFetch', () => {
     })
 
     await vi.waitFor(() => expect(connect).toHaveBeenCalledTimes(1))
-    const connection = new MockWebSocketConnection()
     wsFetch.close()
-    resolveConnect(connection)
+    expect(pendingConnection.closed).toBe(true)
+    resolveConnect()
 
     await expect(responsePromise).rejects.toThrow(/WebSocket closed|AbortError/)
-    expect(connection.closed).toBe(true)
+    expect(pendingConnection.closed).toBe(true)
   })
 
   it('releases the request queue after a connection failure', async () => {
