@@ -133,8 +133,8 @@ describe('createMixlayer', () => {
     const provider = createMixlayer({ apiKey: 'test' })
     const model = provider('mixlayer/qwen/qwen3.5-9b')
     expect(model).toBeDefined()
-    // wrapLanguageModel produces a spec-versioned language model
-    expect((model as { specificationVersion?: string }).specificationVersion).toMatch(/^v\d+$/)
+    // AI SDK v7 providers expose v4 language models.
+    expect((model as { specificationVersion?: string }).specificationVersion).toBe('v4')
   })
 
   it('the default provider instance is usable', () => {
