@@ -424,11 +424,14 @@ function buildWebSocketHeaders({
   optionHeaders?: Record<string, string>
   betaHeader?: string | false
 }): Record<string, string> {
+  const hasOptionUserAgent = hasHeader(optionHeaders, 'user-agent')
+
   return removeUndefinedHeaders({
     Authorization: requestHeaders.authorization,
     ...(betaHeader !== false && {
       'OpenAI-Beta': betaHeader ?? MIXLAYER_RESPONSES_WEBSOCKET_BETA,
     }),
+    ...(!hasOptionUserAgent && { 'User-Agent': requestHeaders['user-agent'] }),
     ...optionHeaders,
   })
 }
@@ -437,6 +440,11 @@ function removeUndefinedHeaders(headers: Record<string, string | undefined>): Re
   return Object.fromEntries(
     Object.entries(headers).filter(([, value]) => value !== undefined)
   ) as Record<string, string>
+}
+
+function hasHeader(headers: Record<string, string> | undefined, name: string): boolean {
+  const lowerName = name.toLowerCase()
+  return Object.keys(headers ?? {}).some(key => key.toLowerCase() === lowerName)
 }
 
 function stableHeaderKey(headers: Record<string, string>): string {

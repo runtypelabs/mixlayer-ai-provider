@@ -290,7 +290,10 @@ describe('createMixlayerWebSocketFetch', () => {
     try {
       const response = await wsFetch('https://models.mixlayer.ai/v1/responses', {
         method: 'POST',
-        headers: { Authorization: 'Bearer test-key' },
+        headers: {
+          Authorization: 'Bearer test-key',
+          'User-Agent': 'ai-sdk/openai/4.0.0 ai-sdk/provider-utils/5.0.0',
+        },
         body: JSON.stringify({
           model: 'qwen/qwen3.5-9b',
           input: [],
@@ -306,6 +309,9 @@ describe('createMixlayerWebSocketFetch', () => {
       expect(socket.url).toBe('wss://127.0.0.1:8787/v1/responses')
       expect(socket.headers.Authorization).toBe('Bearer test-key')
       expect(socket.headers['OpenAI-Beta']).toBe(MIXLAYER_RESPONSES_WEBSOCKET_BETA)
+      expect(socket.headers['User-Agent']).toBe(
+        'ai-sdk/openai/4.0.0 ai-sdk/provider-utils/5.0.0'
+      )
       expect(JSON.parse(socket.sent[0]) as unknown).toEqual({
         type: 'response.create',
         model: 'qwen/qwen3.5-9b',
@@ -319,6 +325,41 @@ describe('createMixlayerWebSocketFetch', () => {
       const text = await response.text()
       expect(text).toContain('data: {"type":"response.output_text.delta","delta":"hi"}')
       expect(text).toContain('data: [DONE]')
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('lets WebSocket option headers override the request user agent', async () => {
+    let socket: MockWebSocketConnection | undefined
+    const wsFetch = createMixlayerWebSocketFetch({
+      headers: { 'User-Agent': 'custom-mixlayer-ws-client' },
+      connect: async ({ url, headers }: MixlayerWebSocketConnectOptions) => {
+        socket = new MockWebSocketConnection(url, headers)
+        return socket
+      },
+    })
+
+    try {
+      const response = await wsFetch('https://models.mixlayer.ai/v1/responses', {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-key',
+          'User-Agent': 'ai-sdk/openai/4.0.0 ai-sdk/provider-utils/5.0.0',
+        },
+        body: JSON.stringify({
+          model: 'qwen/qwen3.5-9b',
+          input: [],
+          stream: true,
+          store: false,
+        }),
+      })
+
+      await vi.waitFor(() => expect(socket?.sent).toHaveLength(1))
+      expect(socket?.headers['User-Agent']).toBe('custom-mixlayer-ws-client')
+
+      socket?.emitMessage(JSON.stringify({ type: 'response.completed', response: { id: 'resp_1' } }))
+      expect(await response.text()).toContain('data: [DONE]')
     } finally {
       wsFetch.close()
     }
