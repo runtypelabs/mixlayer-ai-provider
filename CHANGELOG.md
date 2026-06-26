@@ -1,5 +1,11 @@
 # @runtypelabs/mixlayer-ai-provider
 
+## 1.0.0
+
+### Major Changes
+
+- 8a28e41: Update the provider for AI SDK v7: depend on `@ai-sdk/openai-compatible` v3, require `ai` v7 as the peer, raise the Node.js requirement to 22+, publish ESM-only artifacts, and expose v4 language model return types.
+
 ## 0.2.4
 
 ### Patch Changes
