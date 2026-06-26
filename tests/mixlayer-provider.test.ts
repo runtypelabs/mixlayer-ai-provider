@@ -1,12 +1,67 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+
+const wsMock = vi.hoisted(() => ({
+  instances: [] as Array<{
+    url: string
+    options: { headers?: Record<string, string> }
+    readyState: number
+    sent: string[]
+    send(data: string, callback?: (error?: Error) => void): void
+    close(): void
+    emit(event: string, ...args: unknown[]): boolean
+  }>,
+}))
+
+vi.mock('ws', async () => {
+  const { EventEmitter } = await import('node:events')
+
+  class MockWebSocket extends EventEmitter {
+    static CONNECTING = 0
+    static OPEN = 1
+    static CLOSING = 2
+    static CLOSED = 3
+
+    readyState = MockWebSocket.CONNECTING
+    sent: string[] = []
+
+    constructor(
+      readonly url: string,
+      readonly options: { headers?: Record<string, string> } = {}
+    ) {
+      super()
+      wsMock.instances.push(this)
+      queueMicrotask(() => {
+        this.readyState = MockWebSocket.OPEN
+        this.emit('open')
+      })
+    }
+
+    send(data: string, callback?: (error?: Error) => void) {
+      this.sent.push(data)
+      callback?.()
+    }
+
+    close() {
+      this.readyState = MockWebSocket.CLOSED
+      this.emit('close')
+    }
+  }
+
+  return { default: MockWebSocket }
+})
+
 import {
   createMixlayer,
   mixlayer,
+  createMixlayerWebSocketFetch,
   extractMixlayerModelId,
+  getMixlayerResponsesWebSocketURL,
   getMixlayerSamplingDefaults,
   isQwen35Or36,
   applyQwenSamplingDefaults,
   MIXLAYER_DEFAULT_BASE_URL,
+  MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL,
+  MIXLAYER_RESPONSES_WEBSOCKET_BETA,
   MIXLAYER_THINKING_DEFAULTS,
   MIXLAYER_NON_THINKING_DEFAULTS,
 } from '../src/index'
@@ -126,7 +181,10 @@ describe('createMixlayer', () => {
     const provider = createMixlayer({ apiKey: 'test' })
     expect(typeof provider).toBe('function')
     expect(typeof provider.languageModel).toBe('function')
+    expect(typeof provider.chat).toBe('function')
+    expect(typeof provider.responses).toBe('function')
     expect(typeof provider.chatModel).toBe('function')
+    expect(typeof provider.responsesModel).toBe('function')
   })
 
   it('builds a wrapped language model for a prefixed id', () => {
@@ -137,6 +195,25 @@ describe('createMixlayer', () => {
     expect((model as { specificationVersion?: string }).specificationVersion).toBe('v4')
   })
 
+  it('builds an explicit Responses API model for a prefixed id', () => {
+    const provider = createMixlayer({ apiKey: 'test' })
+    const model = provider.responses('mixlayer/qwen/qwen3.5-9b')
+    expect(model).toBeDefined()
+    expect((model as { specificationVersion?: string }).specificationVersion).toBe('v4')
+    expect((model as { provider?: string }).provider).toBe('mixlayer.responses')
+    expect((model as { modelId?: string }).modelId).toBe('qwen/qwen3.5-9b')
+  })
+
+  it('can make the callable provider use Responses API models', () => {
+    const provider = createMixlayer({ apiKey: 'test', defaultModelApi: 'responses' })
+    expect((provider('qwen/qwen3.5-9b') as { provider?: string }).provider).toBe(
+      'mixlayer.responses'
+    )
+    expect((provider.chat('qwen/qwen3.5-9b') as { provider?: string }).provider).toBe(
+      'mixlayer.chat'
+    )
+  })
+
   it('the default provider instance is usable', () => {
     expect(typeof mixlayer).toBe('function')
     expect(mixlayer('qwen/qwen3.5-9b')).toBeDefined()
@@ -144,5 +221,88 @@ describe('createMixlayer', () => {
 
   it('exposes the default base URL constant', () => {
     expect(MIXLAYER_DEFAULT_BASE_URL).toBe('https://models.mixlayer.ai/v1')
+  })
+})
+
+describe('getMixlayerResponsesWebSocketURL', () => {
+  it('derives the default Responses WebSocket URL from the base URL', () => {
+    expect(MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL).toBe(
+      'wss://models.mixlayer.ai/v1/responses'
+    )
+    expect(getMixlayerResponsesWebSocketURL()).toBe(MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL)
+  })
+
+  it('supports custom http(s) base URLs and avoids double-appending /responses', () => {
+    expect(getMixlayerResponsesWebSocketURL('http://localhost:8787/v1')).toBe(
+      'ws://localhost:8787/v1/responses'
+    )
+    expect(getMixlayerResponsesWebSocketURL('https://example.test/v1/responses')).toBe(
+      'wss://example.test/v1/responses'
+    )
+  })
+})
+
+describe('createMixlayerWebSocketFetch', () => {
+  it('routes streaming Responses API requests through a response.create WebSocket event', async () => {
+    wsMock.instances.length = 0
+    const wsFetch = createMixlayerWebSocketFetch({
+      url: 'ws://127.0.0.1:8787/v1/responses',
+    })
+
+    try {
+      const response = await wsFetch('https://models.mixlayer.ai/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer test-key' },
+        body: JSON.stringify({
+          model: 'qwen/qwen3.5-9b',
+          input: [],
+          stream: true,
+          store: false,
+        }),
+      })
+
+      await vi.waitFor(() => expect(wsMock.instances).toHaveLength(1))
+      const socket = wsMock.instances[0]
+      await vi.waitFor(() => expect(socket.sent).toHaveLength(1))
+
+      expect(socket.url).toBe('ws://127.0.0.1:8787/v1/responses')
+      expect(socket.options.headers?.Authorization).toBe('Bearer test-key')
+      expect(socket.options.headers?.['OpenAI-Beta']).toBe(MIXLAYER_RESPONSES_WEBSOCKET_BETA)
+      expect(JSON.parse(socket.sent[0]) as unknown).toEqual({
+        type: 'response.create',
+        model: 'qwen/qwen3.5-9b',
+        input: [],
+        store: false,
+      })
+
+      socket.emit(
+        'message',
+        Buffer.from(JSON.stringify({ type: 'response.output_text.delta', delta: 'hi' }))
+      )
+      socket.emit(
+        'message',
+        Buffer.from(JSON.stringify({ type: 'response.completed', response: { id: 'resp_1' } }))
+      )
+
+      const text = await response.text()
+      expect(text).toContain('data: {"type":"response.output_text.delta","delta":"hi"}')
+      expect(text).toContain('data: [DONE]')
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('falls back to fetch for non-streaming Responses API requests', async () => {
+    const wsFetch = createMixlayerWebSocketFetch({
+      fetch: async () => new Response('fallback-ok', { status: 201 }),
+    })
+
+    const response = await wsFetch('https://models.mixlayer.ai/v1/responses', {
+      method: 'POST',
+      body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: false }),
+    })
+
+    expect(response.status).toBe(201)
+    expect(await response.text()).toBe('fallback-ok')
   })
 })

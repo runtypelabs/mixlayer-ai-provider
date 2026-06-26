@@ -8,9 +8,9 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
-  // `ai` and `@ai-sdk/openai-compatible` are the consumer's AI SDK — keep them
-  // external so a single version is deduped by the host app.
-  external: ['ai', '@ai-sdk/openai-compatible'],
+  // AI SDK packages and ws are runtime dependencies — keep them external so a
+  // single provider/transport stack is deduped by the host app.
+  external: ['ai', '@ai-sdk/openai-compatible', '@ai-sdk/openai', 'ws'],
   outExtension() {
     return { js: '.mjs' }
   },
