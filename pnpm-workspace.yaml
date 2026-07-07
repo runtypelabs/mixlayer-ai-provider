@@ -1,4 +1,8 @@
 # esbuild ships a postinstall that downloads its platform binary; approve it
 # so `pnpm install --frozen-lockfile` doesn't halt on ERR_PNPM_IGNORED_BUILDS.
+# In pnpm 11.9+, `allowBuilds` (package -> boolean) is the approval mechanism
+# that takes precedence; `onlyBuiltDependencies` is kept for older pnpm / docs.
+allowBuilds:
+  esbuild: true
 onlyBuiltDependencies:
   - esbuild
