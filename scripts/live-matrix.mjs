@@ -31,14 +31,19 @@ const {
   isQwen35Or36,
 } = providerModule
 
+// Keep in sync with `MixlayerChatModelId` in src/mixlayer-provider.ts and the
+// live /models catalog (verify with `pnpm run validate:models`). Used as the
+// fallback when discovery fails AND --allow-known-models-fallback is set.
 const KNOWN_MODELS = [
   'qwen/qwen3.5-4b-free',
   'qwen/qwen3.5-9b',
-  'qwen/qwen3.5-27b',
   'qwen/qwen3.5-35b-a3b',
   'qwen/qwen3.5-397b-a17b',
   'qwen/qwen3.6-27b',
   'qwen/qwen3.6-35b-a3b',
+  'moonshotai/kimi-k2.6',
+  'moonshotai/kimi-k2.7-code',
+  'z-ai/glm-5.2',
 ]
 
 const args = parseArgs(process.argv.slice(2))
