@@ -280,6 +280,7 @@ export type MixlayerChatModelId =
   | 'qwen/qwen3.6-35b-a3b'
   | 'moonshotai/kimi-k2.6'
   | 'moonshotai/kimi-k2.7-code'
+  | 'z-ai/glm-5.2'
   // eslint-disable-next-line @typescript-eslint/ban-types -- open-union autocomplete idiom
   | (string & {})
 
