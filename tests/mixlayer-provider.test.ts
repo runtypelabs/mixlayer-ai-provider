@@ -7,14 +7,11 @@ import {
   createMixlayerWebSocketFetch,
   extractMixlayerModelId,
   getMixlayerResponsesWebSocketURL,
-  getMixlayerSamplingDefaults,
   isQwen35Or36,
-  applyQwenSamplingDefaults,
+  applyQwenThinking,
   MIXLAYER_DEFAULT_BASE_URL,
   MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL,
   MIXLAYER_RESPONSES_WEBSOCKET_BETA,
-  MIXLAYER_THINKING_DEFAULTS,
-  MIXLAYER_NON_THINKING_DEFAULTS,
   type MixlayerWebSocketConnectOptions,
   type MixlayerWebSocketConnection,
 } from '../src/index'
@@ -92,18 +89,6 @@ describe('extractMixlayerModelId', () => {
   })
 })
 
-describe('getMixlayerSamplingDefaults', () => {
-  it('returns thinking defaults by default', () => {
-    expect(getMixlayerSamplingDefaults(true)).toBe(MIXLAYER_THINKING_DEFAULTS)
-  })
-
-  it('returns non-thinking defaults and disables thinking in extraBody', () => {
-    const defaults = getMixlayerSamplingDefaults(false)
-    expect(defaults).toBe(MIXLAYER_NON_THINKING_DEFAULTS)
-    expect(defaults.extraBody.thinking).toBe(false)
-  })
-})
-
 describe('isQwen35Or36', () => {
   it('matches the Qwen 3.5 / 3.6 catalog ids (dotted, with or without org)', () => {
     for (const id of [
@@ -144,47 +129,40 @@ describe('isQwen35Or36', () => {
   })
 })
 
-describe('applyQwenSamplingDefaults', () => {
-  it('injects the thinking defaults for a Qwen 3.5 / 3.6 model', () => {
-    const out = applyQwenSamplingDefaults({ model: 'qwen/qwen3.5-9b', messages: [] })
-    expect(out.temperature).toBe(MIXLAYER_THINKING_DEFAULTS.temperature)
-    expect(out.top_p).toBe(MIXLAYER_THINKING_DEFAULTS.topP)
-    expect(out.top_k).toBe(MIXLAYER_THINKING_DEFAULTS.topK)
-    expect(out.presence_penalty).toBe(MIXLAYER_THINKING_DEFAULTS.presencePenalty)
+describe('applyQwenThinking', () => {
+  it('sets thinking: true by default for a Qwen 3.5 / 3.6 model', () => {
+    const out = applyQwenThinking({ model: 'qwen/qwen3.5-9b', messages: [] })
     expect(out.thinking).toBe(true)
-    expect(out.repetition_penalty).toBe(1.0)
-    expect(out).not.toHaveProperty('min_p')
   })
 
-  it('injects the non-thinking defaults (thinking: false) when thinking=false', () => {
-    const out = applyQwenSamplingDefaults({ model: 'qwen/qwen3.6-27b', messages: [] }, false)
-    expect(out.temperature).toBe(MIXLAYER_NON_THINKING_DEFAULTS.temperature)
+  it('sets thinking: false when thinking=false', () => {
+    const out = applyQwenThinking({ model: 'qwen/qwen3.6-27b', messages: [] }, false)
     expect(out.thinking).toBe(false)
   })
 
-  it('lets caller-set request values override the defaults', () => {
-    const out = applyQwenSamplingDefaults({ model: 'qwen/qwen3.5-9b', temperature: 0, top_p: 0.1 })
+  it('does NOT inject sampling defaults (Mixlayer applies them server-side)', () => {
+    const out = applyQwenThinking({ model: 'qwen/qwen3.5-9b', messages: [] })
+    for (const key of ['temperature', 'top_p', 'top_k', 'presence_penalty', 'repetition_penalty', 'min_p']) {
+      expect(out).not.toHaveProperty(key)
+    }
+  })
+
+  it('preserves caller-set sampling values untouched', () => {
+    const out = applyQwenThinking({ model: 'qwen/qwen3.5-9b', temperature: 0, top_p: 0.1 })
     expect(out.temperature).toBe(0)
     expect(out.top_p).toBe(0.1)
   })
 
-  it('does not let undefined AI SDK call settings erase defaults', () => {
-    const out = applyQwenSamplingDefaults({
-      model: 'qwen/qwen3.5-9b',
-      temperature: undefined,
-      top_p: undefined,
-      presence_penalty: undefined,
-    })
-    expect(out.temperature).toBe(MIXLAYER_THINKING_DEFAULTS.temperature)
-    expect(out.top_p).toBe(MIXLAYER_THINKING_DEFAULTS.topP)
-    expect(out.presence_penalty).toBe(MIXLAYER_THINKING_DEFAULTS.presencePenalty)
+  it('lets a caller-set thinking value win', () => {
+    const body = { model: 'qwen/qwen3.5-9b', thinking: false }
+    expect(applyQwenThinking(body, true)).toBe(body)
   })
 
   it('leaves later-Qwen and other-family models untouched', () => {
     const future = { model: 'qwen/qwen3.7-27b', messages: [] }
-    expect(applyQwenSamplingDefaults(future)).toBe(future)
+    expect(applyQwenThinking(future)).toBe(future)
     const kimi = { model: 'kimi-k2-instruct', messages: [] }
-    expect(applyQwenSamplingDefaults(kimi)).toBe(kimi)
+    expect(applyQwenThinking(kimi)).toBe(kimi)
   })
 })
 

@@ -15,8 +15,8 @@ for Responses API models, baking in everything Mixlayer needs to behave
 correctly out of the box:
 
 - the Mixlayer base URL
-- recommended Chat Completions Qwen sampling defaults (thinking /
-  non-thinking), scoped to the Qwen 3.5 / 3.6 models and overridable per request
+- the Qwen thinking toggle (Chat Completions `thinking` field / Responses
+  `reasoning.effort`), scoped to the Qwen 3.5 / 3.6 models
 - reasoning support — `<think>` tags and native `reasoning_content` both surface
   as AI SDK reasoning parts
 - Responses API models and a Responses WebSocket `fetch` adapter for lower
@@ -57,7 +57,7 @@ import { createMixlayer } from '@runtypelabs/mixlayer-ai-provider'
 
 const provider = createMixlayer({
   apiKey: process.env.MIXLAYER_API_KEY,
-  thinking: false, // use the non-thinking Qwen sampling defaults
+  thinking: false, // disable Qwen thinking
 })
 
 const model = provider('qwen/qwen3.5-9b')
@@ -147,17 +147,20 @@ The `MixlayerChatModelId` union ships a snapshot of the known ids for editor
 autocomplete, but the union is open — any model id string is accepted, so new
 models and future families work without a package update.
 
-## Sampling defaults
+## Sampling and thinking
+
+Mixlayer applies each model's recommended sampling defaults **server-side** (see
+the [chat completions parameter reference](https://docs.mixlayer.com/chat-completions#sampling-parameters)
+and [per-model notes](https://docs.mixlayer.com/models#qwen-35)), so the
+provider does not inject any sampling parameters — only values you set on a
+request (`temperature`, `topP`, etc.) are sent.
 
 For Chat Completions models (`provider(id)`, `provider.chat(id)`, and
-`provider.chatModel(id)`), the provider applies Mixlayer's recommended Qwen
-sampling defaults automatically, drawn from Mixlayer's
-[chat completions parameter reference](https://docs.mixlayer.com/chat-completions#sampling-parameters)
-and [per-model notes](https://docs.mixlayer.com/models#qwen-35). They apply
-**only to Qwen 3.5 / 3.6 models**, so later Qwen generations and other model
-families pass through untouched. Any `temperature` / `top_p` / etc. you set on a
-request always takes precedence. Use the exported `isQwen35Or36(modelId)` helper
-if you need the same predicate.
+`provider.chatModel(id)`), the provider sends Mixlayer's documented `thinking`
+request field based on the `thinking` setting. It applies **only to Qwen 3.5 /
+3.6 models**, so later Qwen generations and other model families pass through
+untouched; a `thinking` value you set on the request body yourself wins. Use the
+exported `isQwen35Or36(modelId)` helper if you need the same predicate.
 
 Responses API models (`provider.responses(id)`) use the OpenAI Responses request
 shape so they remain compatible with Mixlayer's Responses HTTP and WebSocket
@@ -173,13 +176,11 @@ API rejects the Chat Completions-only `thinking` field.
 | `createMixlayer(settings)`                                      | Provider factory                                                 |
 | `createMixlayerWebSocketFetch(options?)`                        | Fetch adapter for Responses API streaming over WebSocket         |
 | `extractMixlayerModelId(id)`                                    | Strips a leading `mixlayer/` prefix                              |
-| `getMixlayerSamplingDefaults(thinking)`                         | Returns the Qwen sampling defaults for a mode                    |
 | `isQwen35Or36(modelId)`                                         | Whether an id is a Qwen 3.5 / 3.6 model (the scoped generations) |
-| `applyQwenSamplingDefaults(body, thinking?)`                    | Applies the defaults to a request body, scoped to Qwen 3.5 / 3.6 |
+| `applyQwenThinking(body, thinking?)`                            | Sets the `thinking` field on a request body, scoped to Qwen 3.5 / 3.6 |
 | `MIXLAYER_DEFAULT_BASE_URL`                                     | `https://models.mixlayer.ai/v1`                                  |
 | `MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL`                      | `wss://models.mixlayer.ai/v1/responses`                          |
 | `getMixlayerResponsesWebSocketURL(baseURL?)`                    | Derives a Responses WebSocket URL from an HTTP base URL          |
-| `MIXLAYER_THINKING_DEFAULTS` / `MIXLAYER_NON_THINKING_DEFAULTS` | The raw sampling-default objects                                 |
 
 The provider also exposes:
 
@@ -196,7 +197,7 @@ The provider also exposes:
 | `headers`         | `Record<string,string>` | —                           | Extra headers sent with every request                                    |
 | `fetch`           | `typeof fetch`         | `globalThis.fetch`          | Custom fetch; pass `createMixlayerWebSocketFetch()` for WS streaming     |
 | `includeUsage`    | `boolean`              | —                           | Include usage information in streaming Chat Completions responses        |
-| `thinking`        | `boolean`              | `true`                      | Apply Qwen thinking/non-thinking defaults; Responses uses `reasoning.effort: 'none'` for `false` |
+| `thinking`        | `boolean`              | `true`                      | Qwen thinking toggle (`thinking` field); Responses uses `reasoning.effort: 'none'` for `false` |
 | `defaultModelApi` | `'chat' \| 'responses'` | `'chat'`                    | API used by `provider(id)` and `provider.languageModel(id)`              |
 
 ### `createMixlayerWebSocketFetch(options)`

@@ -11,8 +11,8 @@
 // Mixlayer behave correctly out of the box:
 //
 //   - the Mixlayer base URL default
-//   - family-specific Chat Completions sampling defaults (currently the Qwen
-//     3.5 / 3.6 defaults, thinking / non-thinking)
+//   - the Qwen `thinking` toggle (Mixlayer applies the recommended sampling
+//     defaults server-side, so the provider no longer injects them)
 //   - reasoning middleware that extracts `<think>` tags into AI SDK reasoning
 //     parts (the provider also emits native `reasoning_content`)
 //   - OpenAI Responses API models, which can be paired with
@@ -42,61 +42,10 @@ import { MIXLAYER_DEFAULT_BASE_URL } from './constants'
 type MixlayerFetchFunction = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
 /**
- * Recommended Qwen open-weight sampling defaults. These are the same across the
- * open-weight Qwen sizes Mixlayer serves (4B / 9B / 27B / 35B-A3B / 397B-A17B)
- * and stable across the **3.5 and 3.6** generations.
- *
- * Source: Mixlayer's chat completion and per-model documentation, which adapts
- * Qwen's published guidance to the parameters the Mixlayer API exposes:
- * https://docs.mixlayer.com/chat-completions#sampling-parameters
- * https://docs.mixlayer.com/models#qwen-35
- *
- * The provider applies them automatically, but ONLY to Qwen 3.5 / 3.6 models
- * (see {@link isQwen35Or36}). Future Qwen generations and any other model family
- * pass through untouched, and any value the caller sets on the request wins
- * (the defaults are overridable per call).
- *
- * Qwen thinking is controlled with Mixlayer's documented `thinking` request
- * field.
- *
- * `extraBody` carries Mixlayer-specific fields. The scalar fields
- * (`temperature`, `topP`, `topK`, `presencePenalty`) are also exposed so
- * callers that build their own `streamText`/`generateText` params can reuse
- * them as fallbacks.
- */
-export const MIXLAYER_THINKING_DEFAULTS = {
-  temperature: 1.0,
-  topP: 0.95,
-  topK: 20,
-  presencePenalty: 0.0,
-  extraBody: { thinking: true, repetition_penalty: 1.0 } as Record<string, unknown>,
-} as const
-
-export const MIXLAYER_NON_THINKING_DEFAULTS = {
-  temperature: 0.7,
-  topP: 0.8,
-  topK: 20,
-  presencePenalty: 1.5,
-  extraBody: {
-    thinking: false,
-    repetition_penalty: 1.0,
-  } as Record<string, unknown>,
-} as const
-
-export type MixlayerSamplingDefaults =
-  | typeof MIXLAYER_THINKING_DEFAULTS
-  | typeof MIXLAYER_NON_THINKING_DEFAULTS
-
-/** Returns the Qwen sampling defaults for the given thinking mode. */
-export function getMixlayerSamplingDefaults(thinking: boolean): MixlayerSamplingDefaults {
-  return thinking ? MIXLAYER_THINKING_DEFAULTS : MIXLAYER_NON_THINKING_DEFAULTS
-}
-
-/**
- * Whether a model id is a Qwen **3.5 or 3.6** model — the generations the
- * bundled sampling defaults are tuned for. Later Qwen generations (3.7+) and
+ * Whether a model id is a Qwen **3.5 or 3.6** model — the generations whose
+ * `thinking` toggle this provider manages. Later Qwen generations (3.7+) and
  * other model families return `false`, so they receive vanilla
- * OpenAI-compatible behavior with no injected defaults.
+ * OpenAI-compatible behavior with no injected fields.
  *
  * Matches the dotted ids Mixlayer uses (`qwen/qwen3.5-9b`, `qwen/qwen3.6-35b-a3b`),
  * with or without the `qwen/` org segment, and tolerates a dash form
@@ -108,34 +57,23 @@ export function isQwen35Or36(modelId: string): boolean {
 }
 
 /**
- * Returns `body` with the Qwen sampling defaults applied — but only when
- * `body.model` is a Qwen 3.5 / 3.6 model ({@link isQwen35Or36}). Defaults are
- * spread first and the original `body` last, so any value the caller already
- * set on the request takes precedence (the defaults are overridable per call).
- * Models from other families and later Qwen generations are returned unchanged.
+ * Returns `body` with Mixlayer's documented `thinking` request field set — but
+ * only when `body.model` is a Qwen 3.5 / 3.6 model ({@link isQwen35Or36}) and
+ * the caller hasn't already set `thinking` on the request themselves. Models
+ * from other families and later Qwen generations are returned unchanged.
  *
- * This is the Qwen-family helper; other model families Mixlayer adds in future
- * (e.g. Kimi) would get their own scoped helper alongside this one.
+ * Sampling defaults (`temperature`, `top_p`, `top_k`, penalties) are no longer
+ * injected here — Mixlayer applies the recommended per-model defaults
+ * server-side, so the provider only sends values the caller sets explicitly.
  */
-export function applyQwenSamplingDefaults(
+export function applyQwenThinking(
   body: Record<string, unknown>,
   thinking = true
 ): Record<string, unknown> {
   const modelId = typeof body.model === 'string' ? body.model : ''
   if (!isQwen35Or36(modelId)) return body
-  const defaults = getMixlayerSamplingDefaults(thinking)
-  const definedBody = Object.fromEntries(
-    Object.entries(body).filter(([, value]) => value !== undefined)
-  )
-  // Body keys use the OpenAI/vLLM snake_case wire format.
-  return {
-    temperature: defaults.temperature,
-    top_p: defaults.topP,
-    top_k: defaults.topK,
-    presence_penalty: defaults.presencePenalty,
-    ...defaults.extraBody,
-    ...definedBody,
-  }
+  if (body.thinking !== undefined) return body
+  return { ...body, thinking }
 }
 
 /**
@@ -246,11 +184,10 @@ export interface MixlayerProviderSettings {
   /** Include usage information in streaming responses. */
   includeUsage?: boolean
   /**
-   * Whether to apply the Qwen *thinking* sampling defaults. When `false`, the
-   * non-thinking Chat Completions defaults are used (including
-   * `thinking: false`). Responses API Qwen 3.5 / 3.6 models use
-   * `reasoning.effort: "none"` instead because `/responses` rejects the
-   * Chat Completions-only `thinking` field.
+   * Whether Qwen 3.5 / 3.6 models think. Chat Completions requests send
+   * Mixlayer's documented `thinking` field; Responses API models use
+   * `reasoning.effort: "none"` for `false` instead because `/responses`
+   * rejects the Chat Completions-only `thinking` field.
    * Defaults to `true` — Qwen thinks by default.
    */
   thinking?: boolean
@@ -309,11 +246,12 @@ export interface MixlayerProvider {
 /**
  * Creates a Mixlayer provider backed by `@ai-sdk/openai-compatible` for Chat
  * Completions and `@ai-sdk/openai` for Responses API models. Chat Completions
- * models get Qwen sampling defaults baked into the request body (scoped to Qwen
- * 3.5 / 3.6). Responses API models use the OpenAI-compatible request shape so
- * they work with Mixlayer's Responses HTTP and WebSocket endpoints; for Qwen
- * 3.5 / 3.6, `thinking: false` maps to `reasoning.effort: "none"`. Both model
- * types are wrapped with `<think>`-tag reasoning extraction.
+ * requests for Qwen 3.5 / 3.6 models carry the `thinking` toggle (sampling
+ * defaults are applied server-side by Mixlayer). Responses API models use the
+ * OpenAI-compatible request shape so they work with Mixlayer's Responses HTTP
+ * and WebSocket endpoints; for Qwen 3.5 / 3.6, `thinking: false` maps to
+ * `reasoning.effort: "none"`. Both model types are wrapped with `<think>`-tag
+ * reasoning extraction.
  */
 export function createMixlayer(settings: MixlayerProviderSettings = {}): MixlayerProvider {
   const thinking = settings.thinking ?? true
@@ -326,11 +264,10 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
     headers: settings.headers,
     fetch: settings.fetch,
     includeUsage: settings.includeUsage,
-    // Layer in family-specific sampling defaults. Today that's the Qwen 3.5 /
-    // 3.6 family only; other families pass through, and any value the caller
-    // set on the request wins (overridable per call).
-    transformRequestBody: (body: Record<string, unknown>) =>
-      applyQwenSamplingDefaults(body, thinking),
+    // Set the Qwen thinking toggle; scoped to Qwen 3.5 / 3.6, other families
+    // pass through, and a caller-set `thinking` value wins. Sampling defaults
+    // are applied server-side by Mixlayer.
+    transformRequestBody: (body: Record<string, unknown>) => applyQwenThinking(body, thinking),
   })
 
   const openaiResponses = createOpenAI({
