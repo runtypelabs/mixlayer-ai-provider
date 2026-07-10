@@ -716,17 +716,27 @@ function assertRequest({ task, calls, output }) {
   }
 
   // Mixlayer applies recommended sampling defaults server-side; the provider
-  // must not inject any sampling parameters the caller didn't set.
-  for (const key of ['temperature', 'top_p', 'top_k', 'presence_penalty', 'repetition_penalty']) {
-    if (!hasExpectedBodyKey(task.testCase, key)) {
-      assertions.push(
-        passIf(
-          body[key] === undefined,
-          `no ${key} default was injected`,
-          `unexpected ${key} was sent: ${body[key]}`
-        )
+  // must not inject any sampling parameters the caller didn't set. Keys the
+  // case sets itself are exempt — via expectedBody, or via expectedWarnings
+  // when the case passes an AI SDK option the adapter warns on (it may still
+  // serialize the caller's value, which is not an injected default).
+  const SAMPLING_OPTION_BY_WIRE_KEY = {
+    temperature: 'temperature',
+    top_p: 'topP',
+    top_k: 'topK',
+    presence_penalty: 'presencePenalty',
+    repetition_penalty: 'repetitionPenalty',
+  }
+  for (const [key, option] of Object.entries(SAMPLING_OPTION_BY_WIRE_KEY)) {
+    if (hasExpectedBodyKey(task.testCase, key)) continue
+    if ((task.testCase.expectedWarnings ?? []).includes(option)) continue
+    assertions.push(
+      passIf(
+        body[key] === undefined,
+        `no ${key} default was injected`,
+        `unexpected ${key} was sent: ${body[key]}`
       )
-    }
+    )
   }
 
   if (isQwen35Or36(task.modelId)) {
