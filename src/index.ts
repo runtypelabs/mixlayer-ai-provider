@@ -2,17 +2,13 @@ export {
   createMixlayer,
   mixlayer,
   extractMixlayerModelId,
-  getMixlayerSamplingDefaults,
   isQwen35Or36,
-  applyQwenSamplingDefaults,
-  MIXLAYER_THINKING_DEFAULTS,
-  MIXLAYER_NON_THINKING_DEFAULTS,
+  applyQwenThinking,
   type MixlayerProvider,
   type MixlayerProviderSettings,
   type MixlayerChatModelId,
   type MixlayerResponsesModelId,
   type MixlayerLanguageModelId,
-  type MixlayerSamplingDefaults,
 } from './mixlayer-provider'
 
 export {

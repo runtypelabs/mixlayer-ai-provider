@@ -323,7 +323,7 @@ function buildCases({ includeStructured, includeTools }) {
     },
     {
       id: 'temperature',
-      description: 'Caller temperature override beats provider defaults.',
+      description: 'Caller temperature is sent on the request.',
       modes: ['generate', 'stream'],
       options: () => ({
         prompt: 'Reply with exactly: OK',
@@ -715,61 +715,21 @@ function assertRequest({ task, calls, output }) {
     )
   }
 
+  // Mixlayer applies recommended sampling defaults server-side; the provider
+  // must not inject any sampling parameters the caller didn't set.
+  for (const key of ['temperature', 'top_p', 'top_k', 'presence_penalty', 'repetition_penalty']) {
+    if (!hasExpectedBodyKey(task.testCase, key)) {
+      assertions.push(
+        passIf(
+          body[key] === undefined,
+          `no ${key} default was injected`,
+          `unexpected ${key} was sent: ${body[key]}`
+        )
+      )
+    }
+  }
+
   if (isQwen35Or36(task.modelId)) {
-    const defaultTemperature = task.thinking ? 1 : 0.7
-    const defaultTopP = task.thinking ? 0.95 : 0.8
-    const defaultPresencePenalty = task.thinking ? 0 : 1.5
-
-    if (!hasExpectedBodyKey(task.testCase, 'temperature')) {
-      assertions.push(
-        passIf(
-          body.temperature === defaultTemperature,
-          `Qwen temperature default ${defaultTemperature} was sent`,
-          `Qwen temperature default mismatch: ${body.temperature}`
-        )
-      )
-    }
-
-    if (!hasExpectedBodyKey(task.testCase, 'top_p')) {
-      assertions.push(
-        passIf(
-          body.top_p === defaultTopP,
-          `Qwen top_p default ${defaultTopP} was sent`,
-          `Qwen top_p default mismatch: ${body.top_p}`
-        )
-      )
-    }
-
-    if (!hasExpectedBodyKey(task.testCase, 'top_k')) {
-      assertions.push(
-        passIf(
-          body.top_k === 20,
-          'Qwen top_k default 20 was sent',
-          `Qwen top_k default mismatch: ${body.top_k}`
-        )
-      )
-    }
-
-    if (!hasExpectedBodyKey(task.testCase, 'presence_penalty')) {
-      assertions.push(
-        passIf(
-          body.presence_penalty === defaultPresencePenalty,
-          `Qwen presence_penalty default ${defaultPresencePenalty} was sent`,
-          `Qwen presence_penalty default mismatch: ${body.presence_penalty}`
-        )
-      )
-    }
-
-    if (!hasExpectedBodyKey(task.testCase, 'repetition_penalty')) {
-      assertions.push(
-        passIf(
-          body.repetition_penalty === 1,
-          'Qwen repetition_penalty default 1 was sent',
-          `Qwen repetition_penalty default mismatch: ${body.repetition_penalty}`
-        )
-      )
-    }
-
     if (!hasExpectedBodyKey(task.testCase, 'thinking')) {
       assertions.push(
         passIf(
