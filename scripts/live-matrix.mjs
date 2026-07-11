@@ -12,6 +12,12 @@ import {
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { WebSocket } from 'ws'
+import {
+  LIVE_MODES,
+  createLiveTasks,
+  parseAllowedList,
+} from './live-matrix-config.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const projectRoot = resolve(__dirname, '..')
@@ -27,24 +33,11 @@ try {
 
 const {
   MIXLAYER_DEFAULT_BASE_URL,
+  MIXLAYER_KNOWN_MODEL_IDS,
   createMixlayer,
+  createMixlayerWebSocketFetch,
   isQwen35Or36,
 } = providerModule
-
-// Keep in sync with `MixlayerChatModelId` in src/mixlayer-provider.ts and the
-// live /models catalog (verify with `pnpm run validate:models`). Used as the
-// fallback when discovery fails AND --allow-known-models-fallback is set.
-const KNOWN_MODELS = [
-  'qwen/qwen3.5-4b-free',
-  'qwen/qwen3.5-9b',
-  'qwen/qwen3.5-35b-a3b',
-  'qwen/qwen3.5-397b-a17b',
-  'qwen/qwen3.6-27b',
-  'qwen/qwen3.6-35b-a3b',
-  'moonshotai/kimi-k2.6',
-  'moonshotai/kimi-k2.7-code',
-  'z-ai/glm-5.2',
-]
 
 const args = parseArgs(process.argv.slice(2))
 
@@ -81,7 +74,12 @@ const outputPath = resolve(
 const includeStructured = args.structured !== false
 const includeTools = args.tools === true
 
-const selectedModes = parseList(args.modes, ['generate', 'stream'])
+const selectedModes = parseAllowedList(args.modes, LIVE_MODES, 'mode')
+const selectedTransports = parseAllowedList(
+  args.transports,
+  ['chat', 'responses-http', 'responses-websocket'],
+  'transport'
+)
 const selectedThinkingModes = parseThinkingModes(args.thinking, [true, false])
 const cases = selectCases(
   buildCases({ includeStructured, includeTools }),
@@ -89,25 +87,18 @@ const cases = selectCases(
 )
 const models = await resolveModels()
 
-const tasks = []
-for (const modelId of models) {
-  for (const thinking of selectedThinkingModes) {
-    for (const testCase of cases) {
-      if (testCase.thinkingModes && !testCase.thinkingModes.includes(thinking)) {
-        continue
-      }
-      for (const mode of selectedModes) {
-        if (testCase.modes.includes(mode)) {
-          tasks.push({ modelId, thinking, testCase, mode })
-        }
-      }
-    }
-  }
-}
+const tasks = createLiveTasks({
+  models,
+  thinkingModes: selectedThinkingModes,
+  transports: selectedTransports,
+  cases,
+  modes: selectedModes,
+})
 
 console.log(`Mixlayer live matrix`)
 console.log(`Base URL: ${baseURL}`)
 console.log(`Models: ${models.join(', ')}`)
+console.log(`Transports: ${selectedTransports.join(', ')}`)
 console.log(`Thinking modes: ${selectedThinkingModes.map(String).join(', ')}`)
 console.log(`Cases: ${cases.map(testCase => testCase.id).join(', ')}`)
 console.log(`Modes: ${selectedModes.join(', ')}`)
@@ -130,6 +121,7 @@ await writeFile(
       durationMs: finishedAt.getTime() - startedAt.getTime(),
       baseURL,
       models,
+      transports: selectedTransports,
       thinkingModes: selectedThinkingModes,
       modes: selectedModes,
       cases: cases.map(({ id, description, modes }) => ({ id, description, modes })),
@@ -149,7 +141,7 @@ if (failed > 0) {
   console.log('')
   for (const result of results.filter(result => result.status === 'failed')) {
     console.log(
-      `FAIL ${result.modelId} thinking=${result.thinking} ${result.caseId}/${result.mode}: ${result.error?.message}`
+      `FAIL ${result.modelId} transport=${result.transport} thinking=${result.thinking} ${result.caseId}/${result.mode}: ${result.error?.message}`
     )
   }
   process.exitCode = 1
@@ -158,11 +150,13 @@ if (failed > 0) {
 async function runTask(task, index, total) {
   const started = Date.now()
   const calls = []
-  const label = `${task.modelId} thinking=${task.thinking} ${task.testCase.id}/${task.mode}`
+  const label = `${task.modelId} transport=${task.transport} thinking=${task.thinking} ${task.testCase.id}/${task.mode}`
+  let websocketFetch
 
   try {
     const fetch = async (input, init = {}) => {
       const call = {
+        transport: 'http',
         url: redact(String(input)),
         method: init.method ?? 'GET',
         requestBody: parseRequestBody(init.body),
@@ -184,11 +178,19 @@ async function runTask(task, index, total) {
       }
     }
 
+    if (task.transport === 'responses-websocket') {
+      websocketFetch = createMixlayerWebSocketFetch({
+        baseURL,
+        fetch,
+        connect: createNodeWebSocketConnector(calls),
+      })
+    }
+
     const provider = createMixlayer({
       apiKey,
       baseURL,
       thinking: task.thinking,
-      fetch,
+      fetch: websocketFetch ?? fetch,
       ...(task.testCase.providerSettings?.(task) ?? {}),
     })
     const model =
@@ -196,7 +198,9 @@ async function runTask(task, index, total) {
         ? createProviderRegistry({ mixlayer: provider }).languageModel(
             `mixlayer:${task.modelId}`
           )
-        : provider(task.modelId)
+        : task.transport === 'chat'
+          ? provider(task.modelId)
+          : provider.responses(task.modelId)
 
     const callOptions = {
       model,
@@ -220,6 +224,7 @@ async function runTask(task, index, total) {
     const result = {
       status: failures.length === 0 ? 'passed' : 'failed',
       modelId: task.modelId,
+      transport: task.transport,
       thinking: task.thinking,
       caseId: task.testCase.id,
       mode: task.mode,
@@ -241,6 +246,7 @@ async function runTask(task, index, total) {
     const result = {
       status: 'failed',
       modelId: task.modelId,
+      transport: task.transport,
       thinking: task.thinking,
       caseId: task.testCase.id,
       mode: task.mode,
@@ -250,6 +256,74 @@ async function runTask(task, index, total) {
     }
     logProgress(index, total, 'failed', label, result.durationMs)
     return result
+  } finally {
+    websocketFetch?.close()
+  }
+}
+
+function createNodeWebSocketConnector(calls) {
+  return async ({ url, headers, signal, onSocket }) => {
+    const socket = new WebSocket(url, { headers })
+    const originalSend = socket.send.bind(socket)
+
+    socket.send = (data, ...sendOptions) => {
+      const requestBody = parseRequestBody(data)
+      if (requestBody?.type === 'response.create') {
+        calls.push({
+          transport: 'websocket',
+          url: redact(url),
+          method: 'WEBSOCKET',
+          eventType: requestBody.type,
+          requestBody,
+          startedAt: new Date().toISOString(),
+        })
+      }
+      return originalSend(data, ...sendOptions)
+    }
+
+    onSocket?.(socket)
+
+    return new Promise((resolve, reject) => {
+      let settled = false
+
+      const cleanup = () => {
+        socket.removeEventListener('open', onOpen)
+        socket.removeEventListener('error', onError)
+        socket.removeEventListener('close', onClose)
+        signal?.removeEventListener('abort', onAbort)
+      }
+      const settle = callback => value => {
+        if (settled) return
+        settled = true
+        cleanup()
+        callback(value)
+      }
+      const resolveOpen = settle(() => resolve(socket))
+      const rejectOpen = settle(reject)
+      const onOpen = () => resolveOpen()
+      const onError = event =>
+        rejectOpen(event?.error ?? new Error('WebSocket connection failed'))
+      const onClose = event =>
+        rejectOpen(
+          new Error(
+            `WebSocket closed before opening (code ${event?.code ?? 'unknown'})`
+          )
+        )
+      const onAbort = () => {
+        try {
+          socket.close()
+        } finally {
+          rejectOpen(signal?.reason ?? new DOMException('Aborted', 'AbortError'))
+        }
+      }
+
+      socket.addEventListener('open', onOpen)
+      socket.addEventListener('error', onError)
+      socket.addEventListener('close', onClose)
+      signal?.addEventListener('abort', onAbort, { once: true })
+
+      if (signal?.aborted) onAbort()
+    })
   }
 }
 
@@ -661,6 +735,71 @@ function buildCases({ includeStructured, includeTools }) {
 }
 
 function assertRequest({ task, calls, output }) {
+  if (task.transport === 'responses-http') {
+    const responsesCall = calls.find(
+      call =>
+        call.transport === 'http' &&
+        call.method === 'POST' &&
+        String(call.url).includes('/responses')
+    )
+    const assertions = [
+      passIf(
+        Boolean(responsesCall),
+        'made a Responses HTTP request',
+        'no Responses HTTP request captured'
+      ),
+    ]
+    if (!responsesCall) return assertions
+
+    const body = responsesCall.requestBody ?? {}
+    assertions.push(
+      passIf(
+        body.model === task.modelId,
+        `request model was ${task.modelId}`,
+        `request model mismatch: ${body.model}`
+      )
+    )
+    if (task.mode === 'stream') {
+      assertions.push(
+        passIf(
+          body.stream === true,
+          'stream=true was sent',
+          'stream request omitted stream=true'
+        )
+      )
+    }
+    return assertions
+  }
+
+  if (task.transport === 'responses-websocket') {
+    const responseCreateCall = calls.find(
+      call => call.transport === 'websocket' && call.eventType === 'response.create'
+    )
+    const body = responseCreateCall?.requestBody ?? {}
+    return [
+      passIf(
+        Boolean(responseCreateCall),
+        'sent a WebSocket response.create event',
+        'no WebSocket response.create event captured'
+      ),
+      ...(responseCreateCall
+        ? [
+            passIf(
+              body.type === 'response.create',
+              'outgoing event type was response.create',
+              `outgoing event type mismatch: ${body.type}`
+            ),
+            passIf(
+              body.model === task.modelId,
+              `request model was ${task.modelId}`,
+              `request model mismatch: ${body.model}`
+            ),
+          ]
+        : []),
+      ...assertTextOrReasoning(output),
+    ]
+  }
+
   const assertions = []
   const chatCall = calls.find(call => String(call.url).includes('/chat/completions'))
 
@@ -836,7 +975,7 @@ async function discoverModels() {
       console.warn(
         `Could not discover models from ${url}; falling back to known catalog. Status ${response.status}.`
       )
-      return KNOWN_MODELS
+      return [...MIXLAYER_KNOWN_MODEL_IDS]
     }
     throw new Error(`Model discovery failed with ${response.status}: ${redact(body)}`)
   }
@@ -849,7 +988,7 @@ async function discoverModels() {
   if (discovered.length === 0) {
     if (args.allowKnownModelsFallback === true) {
       console.warn('Model discovery returned no models; falling back to known catalog.')
-      return KNOWN_MODELS
+      return [...MIXLAYER_KNOWN_MODEL_IDS]
     }
     throw new Error('Model discovery returned no models.')
   }
@@ -1026,6 +1165,8 @@ Options:
   --max-models=n                Limit selected models after filtering.
   --cases=a,b                   Case ids to run. Defaults to all cases.
   --modes=generate,stream       Modes to run. Defaults to both.
+  --transports=chat,responses-http,responses-websocket
+                                Transports to run. Defaults to all three.
   --thinking=true,false         Thinking settings to run. Defaults to both.
   --concurrency=n               Concurrent live calls. Defaults to 1.
   --timeout-ms=n                AI SDK total timeout per task. Defaults to 120000.

@@ -4,8 +4,8 @@ import ts from 'typescript'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-const SOURCE_FILE = resolve('src/mixlayer-provider.ts')
-const TYPE_ALIAS = 'MixlayerChatModelId'
+const SOURCE_FILE = resolve('src/model-catalog.ts')
+const CATALOG_NAME = 'MIXLAYER_KNOWN_MODEL_IDS'
 const DEFAULT_BASE_URL = 'https://models.mixlayer.ai/v1'
 
 const apiKey = process.env.MIXLAYER_API_KEY
@@ -15,43 +15,43 @@ if (!apiKey) {
   fail('MIXLAYER_API_KEY is required to validate the live Mixlayer model catalog.')
 }
 
-const localModels = await readAutocompleteModels()
+const localModels = await readRuntimeCatalog()
 const liveModels = await fetchLiveModels()
 
-const missingFromAutocomplete = liveModels.filter(model => !localModels.includes(model))
-const staleAutocomplete = localModels.filter(model => !liveModels.includes(model))
+const missingFromCatalog = liveModels.filter(model => !localModels.includes(model))
+const staleCatalog = localModels.filter(model => !liveModels.includes(model))
 
 console.log(`Live Mixlayer models: ${liveModels.length}`)
-console.log(`Autocomplete models: ${localModels.length}`)
+console.log(`Runtime catalog models: ${localModels.length}`)
 
-if (missingFromAutocomplete.length > 0 || staleAutocomplete.length > 0) {
-  if (missingFromAutocomplete.length > 0) {
+if (missingFromCatalog.length > 0 || staleCatalog.length > 0) {
+  if (missingFromCatalog.length > 0) {
     annotate(
       'error',
-      `${TYPE_ALIAS} is missing live model id(s): ${missingFromAutocomplete.join(', ')}`
+      `${CATALOG_NAME} is missing live model id(s): ${missingFromCatalog.join(', ')}`
     )
-    console.error('\nMissing from autocomplete list:')
-    for (const model of missingFromAutocomplete) console.error(`  + ${model}`)
+    console.error('\nMissing from runtime catalog:')
+    for (const model of missingFromCatalog) console.error(`  + ${model}`)
   }
 
-  if (staleAutocomplete.length > 0) {
+  if (staleCatalog.length > 0) {
     annotate(
       'error',
-      `${TYPE_ALIAS} contains model id(s) not returned by Mixlayer: ${staleAutocomplete.join(', ')}`
+      `${CATALOG_NAME} contains model id(s) not returned by Mixlayer: ${staleCatalog.join(', ')}`
     )
-    console.error('\nStale/deprecated in autocomplete list:')
-    for (const model of staleAutocomplete) console.error(`  - ${model}`)
+    console.error('\nStale/deprecated in runtime catalog:')
+    for (const model of staleCatalog) console.error(`  - ${model}`)
   }
 
   console.error(
-    `\nUpdate ${TYPE_ALIAS} in ${SOURCE_FILE} so autocomplete matches the live Mixlayer catalog.`
+    `\nUpdate ${CATALOG_NAME} in ${SOURCE_FILE} so the runtime catalog matches the live Mixlayer catalog.`
   )
   process.exit(1)
 }
 
-console.log(`${TYPE_ALIAS} matches the live Mixlayer model catalog.`)
+console.log(`${CATALOG_NAME} matches the live Mixlayer model catalog.`)
 
-async function readAutocompleteModels() {
+async function readRuntimeCatalog() {
   const sourceText = await readFile(SOURCE_FILE, 'utf8')
   const sourceFile = ts.createSourceFile(
     SOURCE_FILE,
@@ -61,37 +61,56 @@ async function readAutocompleteModels() {
     ts.ScriptKind.TS
   )
 
-  let aliasNode
+  let catalogNode
   ts.forEachChild(sourceFile, node => {
-    if (ts.isTypeAliasDeclaration(node) && node.name.text === TYPE_ALIAS) {
-      aliasNode = node
+    if (!ts.isVariableStatement(node)) return
+
+    for (const declaration of node.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.name.text === CATALOG_NAME) {
+        catalogNode = declaration
+      }
     }
   })
 
-  if (!aliasNode) {
-    fail(`Could not find type alias ${TYPE_ALIAS} in ${SOURCE_FILE}.`)
+  if (!catalogNode) {
+    fail(`Could not find runtime catalog ${CATALOG_NAME} in ${SOURCE_FILE}.`)
   }
 
-  const modelIds = [...new Set(collectStringLiteralTypes(aliasNode.type))].sort()
+  if (!catalogNode.initializer) {
+    fail(`${CATALOG_NAME} has no initializer in ${SOURCE_FILE}.`)
+  }
+
+  const initializer = unwrapExpression(catalogNode.initializer)
+  if (!ts.isArrayLiteralExpression(initializer)) {
+    fail(`${CATALOG_NAME} initializer must be an array literal.`)
+  }
+
+  const modelIds = initializer.elements.map(element => {
+    if (!ts.isStringLiteral(element)) {
+      fail(`${CATALOG_NAME} must contain only string literal model ids.`)
+    }
+    return element.text
+  })
 
   if (modelIds.length === 0) {
-    fail(`No string literal model ids found in ${TYPE_ALIAS}.`)
+    fail(`${CATALOG_NAME} must not be empty.`)
   }
 
-  return modelIds
+  const duplicates = modelIds.filter((model, index) => modelIds.indexOf(model) !== index)
+  if (duplicates.length > 0) {
+    fail(
+      `${CATALOG_NAME} contains duplicate model id(s): ${[...new Set(duplicates)].join(', ')}`
+    )
+  }
+
+  return modelIds.sort()
 }
 
-function collectStringLiteralTypes(node) {
-  if (ts.isUnionTypeNode(node)) {
-    return node.types.flatMap(collectStringLiteralTypes)
+function unwrapExpression(node) {
+  while (ts.isAsExpression(node) || ts.isParenthesizedExpression(node)) {
+    node = node.expression
   }
-
-  if (ts.isLiteralTypeNode(node) && ts.isStringLiteral(node.literal)) {
-    return [node.literal.text]
-  }
-
-  // Ignore the open-union `(string & {})` autocomplete idiom.
-  return []
+  return node
 }
 
 async function fetchLiveModels() {
@@ -120,7 +139,7 @@ async function fetchLiveModels() {
 
 function annotate(level, message) {
   if (process.env.GITHUB_ACTIONS === 'true') {
-    console.error(`::${level} file=src/mixlayer-provider.ts,title=Mixlayer model catalog drift::${escapeAnnotation(message)}`)
+    console.error(`::${level} file=src/model-catalog.ts,title=Mixlayer runtime catalog drift::${escapeAnnotation(message)}`)
   }
 }
 

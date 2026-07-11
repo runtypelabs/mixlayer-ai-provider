@@ -143,9 +143,10 @@ Pass any model id from Mixlayer's catalog — see the
 [Mixlayer models page](https://docs.mixlayer.com/models) for the live list and
 pricing. Ids look like `qwen/qwen3.6-27b` or `moonshotai/kimi-k2.6`.
 
-The `MixlayerChatModelId` union ships a snapshot of the known ids for editor
-autocomplete, but the union is open — any model id string is accepted, so new
-models and future families work without a package update.
+`MIXLAYER_KNOWN_MODEL_IDS` is the package's readonly snapshot of known ids for
+editor autocomplete and offline tooling. `MixlayerChatModelId` derives its
+known members from that snapshot but remains open — any model id string is
+accepted, so new models and future families work without a package update.
 
 ## Sampling and thinking
 
@@ -175,6 +176,7 @@ API rejects the Chat Completions-only `thinking` field.
 | `mixlayer`                                                      | Default provider instance (thinking mode, key from env)          |
 | `createMixlayer(settings)`                                      | Provider factory                                                 |
 | `createMixlayerWebSocketFetch(options?)`                        | Fetch adapter for Responses API streaming over WebSocket         |
+| `MIXLAYER_KNOWN_MODEL_IDS`                                     | Readonly snapshot of known model ids                              |
 | `extractMixlayerModelId(id)`                                    | Strips a leading `mixlayer/` prefix                              |
 | `isQwen35Or36(modelId)`                                         | Whether an id is a Qwen 3.5 / 3.6 model (the scoped generations) |
 | `applyQwenThinking(body, thinking?)`                            | Sets the `thinking` field on a request body, scoped to Qwen 3.5 / 3.6 |
@@ -204,8 +206,8 @@ The provider also exposes:
 
 | Option       | Type                  | Default                                  | Description                                      |
 | ------------ | --------------------- | ---------------------------------------- | ------------------------------------------------ |
-| `url`        | `string`              | Derived from `baseURL`                   | Responses WebSocket endpoint                     |
-| `baseURL`    | `string`              | `MIXLAYER_DEFAULT_BASE_URL`              | HTTP base URL used to derive `url`               |
+| `url`        | `string`              | Derived from `baseURL`                   | Responses WebSocket destination                  |
+| `baseURL`    | `string`              | `MIXLAYER_DEFAULT_BASE_URL`              | HTTP Responses endpoint to intercept; also derives `url` when omitted |
 | `headers`    | `Record<string,string>` | —                                      | Extra headers for the WebSocket handshake        |
 | `betaHeader` | `string \| false`     | `MIXLAYER_RESPONSES_WEBSOCKET_BETA`      | OpenAI Responses WebSocket beta header value     |
 | `fetch`      | `typeof fetch`        | `globalThis.fetch`                       | Fallback fetch and default fetch-upgrade client  |
