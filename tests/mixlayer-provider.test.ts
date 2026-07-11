@@ -12,9 +12,15 @@ import {
   MIXLAYER_DEFAULT_BASE_URL,
   MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL,
   MIXLAYER_RESPONSES_WEBSOCKET_BETA,
+  MIXLAYER_KNOWN_MODEL_IDS,
+  type MixlayerChatModelId,
   type MixlayerWebSocketConnectOptions,
   type MixlayerWebSocketConnection,
 } from '../src/index'
+
+const futureModelId: MixlayerChatModelId = 'future/model-not-in-snapshot'
+
+void futureModelId
 
 class MockWebSocketConnection extends EventTarget implements MixlayerWebSocketConnection {
   readyState = 1
@@ -49,7 +55,31 @@ class MockWebSocketConnection extends EventTarget implements MixlayerWebSocketCo
     Object.defineProperty(event, 'data', { value: data })
     this.dispatchEvent(event)
   }
+
+  emitClose() {
+    this.readyState = 3
+    this.dispatchEvent(new Event('close'))
+  }
 }
+
+describe('MIXLAYER_KNOWN_MODEL_IDS', () => {
+  it('exports the current model snapshot without duplicates', () => {
+    expect(MIXLAYER_KNOWN_MODEL_IDS).toEqual([
+      'qwen/qwen3.5-4b-free',
+      'qwen/qwen3.5-9b',
+      'qwen/qwen3.5-35b-a3b',
+      'qwen/qwen3.5-397b-a17b',
+      'qwen/qwen3.6-27b',
+      'qwen/qwen3.6-35b-a3b',
+      'moonshotai/kimi-k2.6',
+      'moonshotai/kimi-k2.7-code',
+      'z-ai/glm-5.2',
+    ])
+    expect(new Set(MIXLAYER_KNOWN_MODEL_IDS).size).toBe(
+      MIXLAYER_KNOWN_MODEL_IDS.length
+    )
+  })
+})
 
 function createWebSocketResponse(connection: MockWebSocketConnection): Response {
   const response = new Response(null) as Response & {
@@ -225,6 +255,169 @@ describe('createMixlayer', () => {
     expect(authorizations).toEqual(['Bearer real-mixlayer-token'])
   })
 
+  it('disables Responses reasoning by default when thinking is false', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const provider = createMixlayer({
+      apiKey: 'test',
+      thinking: false,
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify(createResponsesSuccessBody()), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    await generateText({
+      model: provider.responses('qwen/qwen3.5-4b-free'),
+      prompt: 'Say ok',
+    })
+
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({ reasoning: { effort: 'none' } })
+  })
+
+  it('preserves top-level Responses reasoning when thinking is false', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const provider = createMixlayer({
+      apiKey: 'test',
+      thinking: false,
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify(createResponsesSuccessBody()), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    await generateText({
+      model: provider.responses('qwen/qwen3.5-4b-free'),
+      prompt: 'Say ok',
+      reasoning: 'high',
+    })
+
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({ reasoning: { effort: 'high' } })
+  })
+
+  it('preserves future top-level Responses reasoning levels', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const provider = createMixlayer({
+      apiKey: 'test',
+      thinking: false,
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify(createResponsesSuccessBody()), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    await generateText({
+      model: provider.responses('qwen/qwen3.5-4b-free'),
+      prompt: 'Say ok',
+      reasoning: 'future-level' as 'high',
+    })
+
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({ reasoning: { effort: 'future-level' } })
+  })
+
+  it('serializes provider Responses reasoning effort for a custom Qwen id', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const provider = createMixlayer({
+      apiKey: 'test',
+      thinking: false,
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify(createResponsesSuccessBody()), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    await generateText({
+      model: provider.responses('qwen/qwen3.5-4b-free'),
+      prompt: 'Say ok',
+      providerOptions: { openai: { reasoningEffort: 'low' } },
+    })
+
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({ reasoning: { effort: 'low' } })
+  })
+
+  it('preserves a provider Responses reasoning summary when thinking is false', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const provider = createMixlayer({
+      apiKey: 'test',
+      thinking: false,
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify(createResponsesSuccessBody()), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    await generateText({
+      model: provider.responses('qwen/qwen3.5-4b-free'),
+      prompt: 'Say ok',
+      providerOptions: { openai: { reasoningSummary: 'detailed' } },
+    })
+
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({ reasoning: { summary: 'detailed' } })
+    expect(bodies[0]).not.toHaveProperty('reasoning.effort')
+  })
+
+  it('prefers provider Responses reasoning effort over top-level reasoning', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const provider = createMixlayer({
+      apiKey: 'test',
+      thinking: false,
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify(createResponsesSuccessBody()), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    await generateText({
+      model: provider.responses('qwen/qwen3.5-4b-free'),
+      prompt: 'Say ok',
+      reasoning: 'high',
+      providerOptions: { openai: { reasoningEffort: 'low' } },
+    })
+
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({ reasoning: { effort: 'low' } })
+  })
+
+  it('preserves an explicit forceReasoning false for Responses requests', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const provider = createMixlayer({
+      apiKey: 'test',
+      thinking: false,
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify(createResponsesSuccessBody()), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    const result = await generateText({
+      model: provider.responses('qwen/qwen3.5-4b-free'),
+      prompt: 'Say ok',
+      providerOptions: { openai: { forceReasoning: false } },
+    })
+
+    expect(result.warnings).toEqual([])
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).not.toHaveProperty('reasoning')
+  })
+
   it('the default provider instance is usable', () => {
     expect(typeof mixlayer).toBe('function')
     expect(mixlayer('qwen/qwen3.5-9b')).toBeDefined()
@@ -303,6 +496,464 @@ describe('createMixlayerWebSocketFetch', () => {
       const text = await response.text()
       expect(text).toContain('data: {"type":"response.output_text.delta","delta":"hi"}')
       expect(text).toContain('data: [DONE]')
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('falls back for a streaming Responses request to a foreign origin', async () => {
+    const fallbackFetch = vi.fn(async () => new Response('fallback-ok', { status: 202 }))
+    const connect = vi.fn(async () => new MockWebSocketConnection())
+    const wsFetch = createMixlayerWebSocketFetch({ fetch: fallbackFetch, connect })
+
+    try {
+      const response = await wsFetch('https://foreign.example/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer foreign-request-marker' },
+        body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+      })
+
+      expect(response.status).toBe(202)
+      expect(await response.text()).toBe('fallback-ok')
+      expect(fallbackFetch).toHaveBeenCalledTimes(1)
+      expect(connect).not.toHaveBeenCalled()
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('falls back for a streaming request at a different same-origin path', async () => {
+    const fallbackFetch = vi.fn(async () => new Response('fallback-ok', { status: 202 }))
+    const connect = vi.fn(async () => new MockWebSocketConnection())
+    const wsFetch = createMixlayerWebSocketFetch({ fetch: fallbackFetch, connect })
+
+    try {
+      const response = await wsFetch('https://models.mixlayer.ai/other/responses', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer wrong-path-marker' },
+        body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+      })
+
+      expect(response.status).toBe(202)
+      expect(await response.text()).toBe('fallback-ok')
+      expect(fallbackFetch).toHaveBeenCalledTimes(1)
+      expect(connect).not.toHaveBeenCalled()
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('uses baseURL for HTTP routing when url separately overrides the socket destination', async () => {
+    let connection: MockWebSocketConnection | undefined
+    const fallbackFetch = vi.fn(async () => new Response('fallback-ok'))
+    const connect = vi.fn(async ({ url }: MixlayerWebSocketConnectOptions) => {
+      connection = new MockWebSocketConnection(url)
+      return connection
+    })
+    const wsFetch = createMixlayerWebSocketFetch({
+      baseURL: 'https://custom.example/api',
+      url: 'wss://socket.example/custom/responses',
+      fetch: fallbackFetch,
+      connect,
+    })
+
+    try {
+      const response = await wsFetch('https://custom.example/api/responses?trace=marker', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer custom-route-marker' },
+        body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+      })
+
+      await vi.waitFor(() => expect(connection?.sent).toHaveLength(1))
+      expect(connect).toHaveBeenCalledTimes(1)
+      expect(connection?.url).toBe('wss://socket.example/custom/responses')
+      expect(fallbackFetch).not.toHaveBeenCalled()
+      connection?.emitMessage(JSON.stringify({ type: 'response.completed' }))
+      expect(await response.text()).toContain('data: [DONE]')
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('lets a lowercase option authorization override request Authorization once', async () => {
+    let connection: MockWebSocketConnection | undefined
+    const wsFetch = createMixlayerWebSocketFetch({
+      headers: { authorization: 'Bearer option-authorization-marker' },
+      connect: async ({ headers }: MixlayerWebSocketConnectOptions) => {
+        connection = new MockWebSocketConnection(undefined, headers)
+        return connection
+      },
+    })
+
+    try {
+      const response = await wsFetch('https://models.mixlayer.ai/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer request-authorization-marker' },
+        body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+      })
+
+      await vi.waitFor(() => expect(connection?.sent).toHaveLength(1))
+      const authorizationEntries = Object.entries(connection?.headers ?? {}).filter(
+        ([name]) => name.toLowerCase() === 'authorization'
+      )
+      expect(authorizationEntries).toEqual([
+        ['authorization', 'Bearer option-authorization-marker'],
+      ])
+      connection?.emitMessage(JSON.stringify({ type: 'response.completed' }))
+      await response.text()
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('lets a lowercase option beta header override betaHeader once', async () => {
+    let connection: MockWebSocketConnection | undefined
+    const wsFetch = createMixlayerWebSocketFetch({
+      betaHeader: 'responses=v2',
+      headers: { 'openai-beta': 'option-beta-marker' },
+      connect: async ({ headers }: MixlayerWebSocketConnectOptions) => {
+        connection = new MockWebSocketConnection(undefined, headers)
+        return connection
+      },
+    })
+
+    try {
+      const response = await wsFetch('https://models.mixlayer.ai/v1/responses', {
+        method: 'POST',
+        body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+      })
+
+      await vi.waitFor(() => expect(connection?.sent).toHaveLength(1))
+      const betaEntries = Object.entries(connection?.headers ?? {}).filter(
+        ([name]) => name.toLowerCase() === 'openai-beta'
+      )
+      expect(betaEntries).toEqual([['openai-beta', 'option-beta-marker']])
+      connection?.emitMessage(JSON.stringify({ type: 'response.completed' }))
+      await response.text()
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('reuses a healthy socket for sequential requests with identical headers', async () => {
+    const connection = new MockWebSocketConnection()
+    const connect = vi.fn(async () => connection)
+    const wsFetch = createMixlayerWebSocketFetch({ connect })
+    const requestInit = {
+      method: 'POST',
+      headers: { Authorization: 'Bearer first-test-key' },
+      body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+    }
+
+    try {
+      const firstResponse = await wsFetch('https://models.mixlayer.ai/v1/responses', requestInit)
+      await vi.waitFor(() => expect(connection.sent).toHaveLength(1))
+      connection.emitMessage(JSON.stringify({ type: 'response.completed', response: { id: 'first' } }))
+      expect(await firstResponse.text()).toContain('data: [DONE]')
+
+      const secondResponse = await wsFetch('https://models.mixlayer.ai/v1/responses', requestInit)
+      await vi.waitFor(() => expect(connection.sent).toHaveLength(2))
+      connection.emitMessage(JSON.stringify({ type: 'response.completed', response: { id: 'second' } }))
+      expect(await secondResponse.text()).toContain('data: [DONE]')
+      expect(connect).toHaveBeenCalledTimes(1)
+      expect(connection.sent.map(message => JSON.parse(message))).toEqual([
+        expect.objectContaining({ type: 'response.create' }),
+        expect.objectContaining({ type: 'response.create' }),
+      ])
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('reconnects after a cached socket with undefined readyState closes', async () => {
+    const connections: MockWebSocketConnection[] = []
+    const connect = vi.fn(async () => {
+      const connection = new MockWebSocketConnection()
+      Object.defineProperty(connection, 'readyState', { value: undefined, writable: true })
+      connections.push(connection)
+      return connection
+    })
+    const wsFetch = createMixlayerWebSocketFetch({ connect })
+    const requestInit = {
+      method: 'POST',
+      headers: { Authorization: 'Bearer first-test-key' },
+      body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+    }
+
+    try {
+      const firstResponse = await wsFetch(
+        'https://models.mixlayer.ai/v1/responses',
+        requestInit
+      )
+      await vi.waitFor(() => expect(connections[0]?.sent).toHaveLength(1))
+      connections[0].emitMessage(JSON.stringify({ type: 'response.completed' }))
+      await firstResponse.text()
+
+      connections[0].dispatchEvent(new Event('close'))
+
+      const secondResponse = await wsFetch(
+        'https://models.mixlayer.ai/v1/responses',
+        requestInit
+      )
+      await vi.waitFor(() => expect(connections).toHaveLength(2))
+      connections[1].emitMessage(JSON.stringify({ type: 'response.completed' }))
+      expect(await secondResponse.text()).toContain('data: [DONE]')
+      expect(connect).toHaveBeenCalledTimes(2)
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('reconnects when authorization changes between sequential requests', async () => {
+    const connections: MockWebSocketConnection[] = []
+    const connect = vi.fn(async ({ headers }: MixlayerWebSocketConnectOptions) => {
+      const connection = new MockWebSocketConnection(undefined, headers)
+      connections.push(connection)
+      return connection
+    })
+    const wsFetch = createMixlayerWebSocketFetch({ connect })
+    const request = (authorization: string) =>
+      wsFetch('https://models.mixlayer.ai/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: authorization },
+        body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+      })
+
+    try {
+      const firstResponse = await request('Bearer first-test-key')
+      await vi.waitFor(() => expect(connections[0]?.sent).toHaveLength(1))
+      connections[0].emitMessage(JSON.stringify({ type: 'response.completed' }))
+      await firstResponse.text()
+
+      const secondResponse = await request('Bearer second-test-key')
+      await vi.waitFor(() => expect(connections).toHaveLength(2))
+      expect(connections[0].closed).toBe(true)
+      expect(connections[1].headers.Authorization).toBe('Bearer second-test-key')
+      expect(JSON.stringify(connections[1].headers)).not.toContain('first-test-key')
+      connections[1].emitMessage(JSON.stringify({ type: 'response.completed' }))
+      await secondResponse.text()
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('retires a cancelled response socket before allowing the next request', async () => {
+    const connections: MockWebSocketConnection[] = []
+    const wsFetch = createMixlayerWebSocketFetch({
+      connect: async () => {
+        const connection = new MockWebSocketConnection()
+        connections.push(connection)
+        return connection
+      },
+    })
+    const request = () =>
+      wsFetch('https://models.mixlayer.ai/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer first-test-key' },
+        body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+      })
+
+    try {
+      const firstResponse = await request()
+      await vi.waitFor(() => expect(connections[0]?.sent).toHaveLength(1))
+      const secondResponsePromise = request()
+      await firstResponse.body!.getReader().cancel()
+      expect(connections[0].closed).toBe(true)
+
+      const secondResponse = await secondResponsePromise
+      await vi.waitFor(() => expect(connections).toHaveLength(2))
+      connections[0].emitMessage(
+        JSON.stringify({ type: 'response.output_text.delta', delta: 'late-old-data' })
+      )
+      connections[1].emitMessage(
+        JSON.stringify({ type: 'response.output_text.delta', delta: 'fresh-data' })
+      )
+      connections[1].emitMessage(JSON.stringify({ type: 'response.completed' }))
+      const text = await secondResponse.text()
+      expect(text).toContain('fresh-data')
+      expect(text).not.toContain('late-old-data')
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('rejects a premature remote close and reconnects for the next request', async () => {
+    const connections: MockWebSocketConnection[] = []
+    const wsFetch = createMixlayerWebSocketFetch({
+      connect: async () => {
+        const connection = new MockWebSocketConnection()
+        connections.push(connection)
+        return connection
+      },
+    })
+    const request = () =>
+      wsFetch('https://models.mixlayer.ai/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer first-test-key' },
+        body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+      })
+
+    try {
+      const firstResponse = await request()
+      await vi.waitFor(() => expect(connections[0]?.sent).toHaveLength(1))
+      connections[0].emitClose()
+      await expect(firstResponse.text()).rejects.toThrow(
+        'WebSocket closed before a terminal response event'
+      )
+
+      const secondResponse = await request()
+      await vi.waitFor(() => expect(connections).toHaveLength(2))
+      connections[1].emitMessage(JSON.stringify({ type: 'response.completed' }))
+      expect(await secondResponse.text()).toContain('data: [DONE]')
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('rejects an init.signal abort while queued without poisoning the queue', async () => {
+    const connection = new MockWebSocketConnection()
+    const wsFetch = createMixlayerWebSocketFetch({ connect: async () => connection })
+    const request = (signal?: AbortSignal) =>
+      wsFetch('https://models.mixlayer.ai/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer first-test-key' },
+        body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+        signal,
+      })
+
+    try {
+      const activeResponse = await request()
+      await vi.waitFor(() => expect(connection.sent).toHaveLength(1))
+      const abortController = new AbortController()
+      const reason = new Error('queued init abort')
+      const queuedResponse = request(abortController.signal)
+      abortController.abort(reason)
+      await expect(queuedResponse).rejects.toBe(reason)
+      expect(connection.sent).toHaveLength(1)
+
+      connection.emitMessage(JSON.stringify({ type: 'response.completed' }))
+      await activeResponse.text()
+      const laterResponse = await request()
+      await vi.waitFor(() => expect(connection.sent).toHaveLength(2))
+      connection.emitMessage(JSON.stringify({ type: 'response.completed' }))
+      await laterResponse.text()
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('honors a Request.signal abort while queued when init.signal is undefined', async () => {
+    const connection = new MockWebSocketConnection()
+    const wsFetch = createMixlayerWebSocketFetch({ connect: async () => connection })
+    const requestInit = {
+      method: 'POST',
+      headers: { Authorization: 'Bearer first-test-key' },
+      body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+    }
+
+    try {
+      const activeResponse = await wsFetch('https://models.mixlayer.ai/v1/responses', requestInit)
+      await vi.waitFor(() => expect(connection.sent).toHaveLength(1))
+      const abortController = new AbortController()
+      const queuedRequest = new Request('https://models.mixlayer.ai/v1/responses', {
+        ...requestInit,
+        signal: abortController.signal,
+      })
+      const queuedResponse = wsFetch(queuedRequest, { signal: undefined })
+      abortController.abort(new Error('queued request abort'))
+      await expect(queuedResponse).rejects.toThrow('queued request abort')
+      expect(connection.sent).toHaveLength(1)
+
+      connection.emitMessage(JSON.stringify({ type: 'response.completed' }))
+      await activeResponse.text()
+      const laterResponse = await wsFetch('https://models.mixlayer.ai/v1/responses', requestInit)
+      await vi.waitFor(() => expect(connection.sent).toHaveLength(2))
+      connection.emitMessage(JSON.stringify({ type: 'response.completed' }))
+      await laterResponse.text()
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('aborts pending connection work and permits a fresh connection', async () => {
+    let resolveFirst!: () => void
+    let firstSignal: AbortSignal | undefined
+    const connections: MockWebSocketConnection[] = []
+    const connect = vi.fn(
+      ({ signal, onSocket }: MixlayerWebSocketConnectOptions) =>
+        new Promise<MixlayerWebSocketConnection>(resolve => {
+          const connection = new MockWebSocketConnection()
+          connections.push(connection)
+          onSocket?.(connection)
+          if (connections.length === 1) {
+            firstSignal = signal
+            resolveFirst = () => resolve(connection)
+          } else {
+            resolve(connection)
+          }
+        })
+    )
+    const wsFetch = createMixlayerWebSocketFetch({ connect })
+    const request = (signal?: AbortSignal) =>
+      wsFetch('https://models.mixlayer.ai/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer first-test-key' },
+        body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+        signal,
+      })
+
+    try {
+      const abortController = new AbortController()
+      const reason = new Error('connection abort')
+      const firstResponse = request(abortController.signal)
+      await vi.waitFor(() => expect(connections).toHaveLength(1))
+      abortController.abort(reason)
+      await expect(firstResponse).rejects.toBe(reason)
+      expect(firstSignal?.aborted).toBe(true)
+      expect(connections[0].closed).toBe(true)
+      expect(connections[0].sent).toHaveLength(0)
+      resolveFirst()
+
+      const secondResponse = await request()
+      await vi.waitFor(() => expect(connections).toHaveLength(2))
+      connections[1].emitMessage(JSON.stringify({ type: 'response.completed' }))
+      await secondResponse.text()
+    } finally {
+      wsFetch.close()
+    }
+  })
+
+  it('retires a connected socket when its request is aborted', async () => {
+    const connections: MockWebSocketConnection[] = []
+    const wsFetch = createMixlayerWebSocketFetch({
+      connect: async () => {
+        const connection = new MockWebSocketConnection()
+        connections.push(connection)
+        return connection
+      },
+    })
+    const request = (signal?: AbortSignal) =>
+      wsFetch('https://models.mixlayer.ai/v1/responses', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer first-test-key' },
+        body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
+        signal,
+      })
+
+    try {
+      const abortController = new AbortController()
+      const reason = new Error('connected abort')
+      const firstResponse = await request(abortController.signal)
+      const firstBody = firstResponse.text()
+      await vi.waitFor(() => expect(connections[0]?.sent).toHaveLength(1))
+      abortController.abort(reason)
+      await expect(firstBody).rejects.toBe(reason)
+      expect(connections[0].closed).toBe(true)
+
+      const secondResponse = await request()
+      await vi.waitFor(() => expect(connections).toHaveLength(2))
+      connections[1].emitMessage(JSON.stringify({ type: 'response.completed' }))
+      await secondResponse.text()
     } finally {
       wsFetch.close()
     }

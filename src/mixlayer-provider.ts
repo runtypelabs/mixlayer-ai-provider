@@ -38,6 +38,7 @@ import { wrapLanguageModel, extractReasoningMiddleware } from 'ai'
 import type { LanguageModelMiddleware } from 'ai'
 import type { LanguageModelV4 } from '@ai-sdk/provider'
 import { MIXLAYER_DEFAULT_BASE_URL } from './constants'
+import type { MixlayerKnownModelId } from './model-catalog'
 
 type MixlayerFetchFunction = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
@@ -145,9 +146,16 @@ function createResponsesThinkingMiddleware(thinking: boolean): LanguageModelMidd
         ? params.providerOptions.openai
         : {}
 
-      if (openaiOptions.reasoningEffort != null || openaiOptions.reasoning != null) {
-        return params
-      }
+      const hasTopLevelReasoningEffort =
+        params.reasoning != null && params.reasoning !== 'provider-default'
+      const hasProviderReasoningControl =
+        openaiOptions.reasoningEffort != null ||
+        openaiOptions.reasoning != null ||
+        openaiOptions.reasoningSummary != null
+      const shouldDefaultReasoningEffort =
+        openaiOptions.forceReasoning !== false &&
+        !hasTopLevelReasoningEffort &&
+        !hasProviderReasoningControl
 
       return {
         ...params,
@@ -159,8 +167,8 @@ function createResponsesThinkingMiddleware(thinking: boolean): LanguageModelMidd
             // `thinking` field, but accepts the OpenAI Responses reasoning
             // object. Force reasoning mode because Mixlayer model ids are not in
             // @ai-sdk/openai's built-in OpenAI reasoning-model allowlist.
-            forceReasoning: true,
-            reasoningEffort: 'none',
+            forceReasoning: openaiOptions.forceReasoning ?? true,
+            ...(shouldDefaultReasoningEffort ? { reasoningEffort: 'none' } : {}),
           },
         },
       }
@@ -209,15 +217,7 @@ export interface MixlayerProviderSettings {
  * the listed ids just provide editor autocomplete.
  */
 export type MixlayerChatModelId =
-  | 'qwen/qwen3.5-4b-free'
-  | 'qwen/qwen3.5-9b'
-  | 'qwen/qwen3.5-35b-a3b'
-  | 'qwen/qwen3.5-397b-a17b'
-  | 'qwen/qwen3.6-27b'
-  | 'qwen/qwen3.6-35b-a3b'
-  | 'moonshotai/kimi-k2.6'
-  | 'moonshotai/kimi-k2.7-code'
-  | 'z-ai/glm-5.2'
+  | MixlayerKnownModelId
   // eslint-disable-next-line @typescript-eslint/ban-types -- open-union autocomplete idiom
   | (string & {})
 

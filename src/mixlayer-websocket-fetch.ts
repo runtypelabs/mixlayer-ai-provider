@@ -1,4 +1,5 @@
 import {
+  MIXLAYER_DEFAULT_BASE_URL,
   MIXLAYER_RESPONSES_WEBSOCKET_BETA,
   getMixlayerResponsesWebSocketURL,
 } from './constants'
@@ -33,8 +34,9 @@ export interface MixlayerWebSocketFetchOptions {
    */
   url?: string
   /**
-   * HTTP base URL used to derive the WebSocket URL when `url` is omitted.
-   * Defaults to `https://models.mixlayer.ai/v1`.
+   * HTTP base URL whose Responses endpoint this adapter intercepts. It also
+   * derives the WebSocket URL when `url` is omitted. Defaults to
+   * `https://models.mixlayer.ai/v1`.
    */
   baseURL?: string
   /** Extra headers to include in the WebSocket handshake. */
@@ -86,6 +88,7 @@ export function createMixlayerWebSocketFetch(
   options: MixlayerWebSocketFetchOptions = {}
 ): MixlayerWebSocketFetch {
   const wsUrl = options.url ?? getMixlayerResponsesWebSocketURL(options.baseURL)
+  const responsesHttpUrl = getResponsesHttpUrl(options.baseURL ?? MIXLAYER_DEFAULT_BASE_URL)
   const fallbackFetch = options.fetch ?? globalThis.fetch.bind(globalThis)
   const connect =
     options.connect ??
@@ -154,6 +157,14 @@ export function createMixlayerWebSocketFetch(
         }
 
         socket = nextSocket
+        nextSocket.addEventListener('close', () => {
+          // A connector may not expose readyState, so invalidate the cached
+          // connection from its lifetime event. Identity and generation checks
+          // prevent a delayed close from clearing a newer connection.
+          if (generation !== connectionGeneration || socket !== nextSocket) return
+          socket = null
+          socketHeaderKey = null
+        })
         return nextSocket
       })
       .catch(error => {
@@ -173,7 +184,8 @@ export function createMixlayerWebSocketFetch(
   async function websocketFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const url = getRequestURL(input)
     const method = getRequestMethod(input, init)
-    if (method !== 'POST' || !isResponsesURL(url)) {
+    const signal = getRequestSignal(input, init)
+    if (method !== 'POST' || !matchesResponsesHttpEndpoint(url, responsesHttpUrl)) {
       return fallbackFetch(input, init)
     }
 
@@ -188,18 +200,33 @@ export function createMixlayerWebSocketFetch(
     })
 
     const releasePreviousRequest = requestQueue
-    let releaseCurrentRequest!: () => void
-    requestQueue = requestQueue.then(
-      () =>
-        new Promise<void>(resolve => {
-          releaseCurrentRequest = resolve
-        })
-    )
-    await releasePreviousRequest
+    let resolveCurrentRequest!: () => void
+    const currentRequest = new Promise<void>(resolve => {
+      resolveCurrentRequest = resolve
+    })
+    requestQueue = releasePreviousRequest.then(() => currentRequest)
+
+    let released = false
+    const releaseCurrentRequest = () => {
+      if (released) return
+      released = true
+      resolveCurrentRequest()
+    }
+
+    try {
+      await waitForQueue(releasePreviousRequest, signal)
+    } catch (error) {
+      releaseCurrentRequest()
+      throw error
+    }
 
     let connection: MixlayerWebSocketConnection
     try {
-      connection = await getConnection(websocketHeaders)
+      connection = await waitForConnection(
+        getConnection(websocketHeaders),
+        signal,
+        closeCurrentSocket
+      )
     } catch (error) {
       releaseCurrentRequest()
       throw error
@@ -208,22 +235,38 @@ export function createMixlayerWebSocketFetch(
     const { stream: _stream, ...requestBody } = body
     const encoder = new TextEncoder()
     let cleanedUp = false
-    let cleanupStream = () => releaseCurrentRequest()
+    let cleanupStream = () => {
+      closeCurrentSocket()
+      releaseCurrentRequest()
+    }
 
     const responseStream = new ReadableStream<Uint8Array>({
       start(controller) {
         let abortHandler: (() => void) | undefined
 
-        function cleanup() {
-          if (cleanedUp) return
-          cleanedUp = true
+        function removeListenersAndRelease() {
           connection.removeEventListener('message', onMessage)
           connection.removeEventListener('error', onError)
           connection.removeEventListener('close', onClose)
-          if (abortHandler) init?.signal?.removeEventListener('abort', abortHandler)
+          if (abortHandler) signal?.removeEventListener('abort', abortHandler)
           releaseCurrentRequest()
         }
-        cleanupStream = cleanup
+
+        function cleanupSuccessfully() {
+          if (cleanedUp) return
+          cleanedUp = true
+          removeListenersAndRelease()
+        }
+
+        function cleanupIndeterminate() {
+          if (cleanedUp) return
+          cleanedUp = true
+          // Retire the socket before releasing the queue. close() may
+          // synchronously dispatch a close event, so mark cleanup first.
+          closeCurrentSocket()
+          removeListenersAndRelease()
+        }
+        cleanupStream = cleanupIndeterminate
 
         function closeStream() {
           try {
@@ -244,55 +287,56 @@ export function createMixlayerWebSocketFetch(
               TERMINAL_RESPONSE_EVENT_TYPES.has(parsed.type)
             ) {
               controller.enqueue(encoder.encode('data: [DONE]\n\n'))
-              cleanup()
+              cleanupSuccessfully()
               closeStream()
             }
           } catch (error) {
-            cleanup()
+            cleanupIndeterminate()
             controller.error(error)
           }
         }
 
         function onError(event: Event) {
-          cleanup()
+          cleanupIndeterminate()
           controller.error(eventToError(event))
         }
 
         function onClose() {
-          cleanup()
-          closeStream()
+          if (cleanedUp) return
+          cleanupIndeterminate()
+          controller.error(new Error('WebSocket closed before a terminal response event'))
         }
 
         connection.addEventListener('message', onMessage)
         connection.addEventListener('error', onError)
         connection.addEventListener('close', onClose)
 
-        if (init?.signal) {
+        if (signal) {
           abortHandler = () => {
-            cleanup()
+            cleanupIndeterminate()
             try {
-              controller.error(
-                init.signal?.reason ?? new DOMException('Aborted', 'AbortError')
-              )
+              controller.error(getAbortReason(signal))
             } catch {
               // The stream may already be closed by the terminal response event.
             }
           }
 
-          if (init.signal.aborted) {
+          if (signal.aborted) {
             abortHandler()
             return
           }
 
-          init.signal.addEventListener('abort', abortHandler, { once: true })
+          signal.addEventListener('abort', abortHandler, { once: true })
         }
 
-        Promise.resolve(
-          connection.send(JSON.stringify({ type: 'response.create', ...requestBody }))
-        ).catch(error => {
-          cleanup()
-          controller.error(error)
-        })
+        Promise.resolve()
+          .then(() =>
+            connection.send(JSON.stringify({ type: 'response.create', ...requestBody }))
+          )
+          .catch(error => {
+            cleanupIndeterminate()
+            controller.error(error)
+          })
       },
       cancel() {
         cleanupStream()
@@ -359,11 +403,85 @@ function getRequestHeaders(
   return init?.headers ?? (input instanceof Request ? input.headers : undefined)
 }
 
-function isResponsesURL(url: string): boolean {
+function getRequestSignal(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined
+): AbortSignal | undefined {
+  if (init?.signal !== undefined) return init.signal ?? undefined
+  return input instanceof Request ? input.signal : undefined
+}
+
+function getAbortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('Aborted', 'AbortError')
+}
+
+function waitForQueue(queue: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return queue
+  if (signal.aborted) return Promise.reject(getAbortReason(signal))
+
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(getAbortReason(signal))
+    signal.addEventListener('abort', onAbort, { once: true })
+    queue.then(
+      () => {
+        signal.removeEventListener('abort', onAbort)
+        resolve()
+      },
+      error => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      }
+    )
+  })
+}
+
+function waitForConnection(
+  connection: Promise<MixlayerWebSocketConnection>,
+  signal: AbortSignal | undefined,
+  retire: () => void
+): Promise<MixlayerWebSocketConnection> {
+  if (!signal) return connection
+  if (signal.aborted) {
+    retire()
+    return Promise.reject(getAbortReason(signal))
+  }
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      retire()
+      reject(getAbortReason(signal))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    connection.then(
+      nextConnection => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(nextConnection)
+      },
+      error => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      }
+    )
+  })
+}
+
+function getResponsesHttpUrl(baseURL: string): string {
+  const url = new URL(baseURL)
+  const path = url.pathname.replace(/\/+$/, '')
+  url.pathname = path.endsWith('/responses') ? path : `${path}/responses`
+  return url.toString()
+}
+
+function matchesResponsesHttpEndpoint(requestUrl: string, responsesHttpUrl: string): boolean {
   try {
-    return new URL(url).pathname.replace(/\/+$/, '').endsWith('/responses')
+    const request = new URL(requestUrl)
+    const configured = new URL(responsesHttpUrl)
+    return (
+      request.origin === configured.origin &&
+      request.pathname.replace(/\/+$/, '') === configured.pathname.replace(/\/+$/, '')
+    )
   } catch {
-    return url.replace(/\/+$/, '').endsWith('/responses')
+    return false
   }
 }
 
@@ -424,33 +542,34 @@ function buildWebSocketHeaders({
   optionHeaders?: Record<string, string>
   betaHeader?: string | false
 }): Record<string, string> {
-  const hasOptionUserAgent = hasHeader(optionHeaders, 'user-agent')
+  const headers: Record<string, string> = {}
+  setHeader(headers, 'Authorization', requestHeaders.authorization)
+  if (betaHeader !== false) {
+    setHeader(headers, 'OpenAI-Beta', betaHeader ?? MIXLAYER_RESPONSES_WEBSOCKET_BETA)
+  }
+  setHeader(headers, 'User-Agent', requestHeaders['user-agent'])
 
-  return removeUndefinedHeaders({
-    Authorization: requestHeaders.authorization,
-    ...(betaHeader !== false && {
-      'OpenAI-Beta': betaHeader ?? MIXLAYER_RESPONSES_WEBSOCKET_BETA,
-    }),
-    ...(!hasOptionUserAgent && { 'User-Agent': requestHeaders['user-agent'] }),
-    ...optionHeaders,
-  })
+  for (const [name, value] of Object.entries(optionHeaders ?? {})) {
+    setHeader(headers, name, value)
+  }
+
+  return headers
 }
 
-function removeUndefinedHeaders(headers: Record<string, string | undefined>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(headers).filter(([, value]) => value !== undefined)
-  ) as Record<string, string>
-}
-
-function hasHeader(headers: Record<string, string> | undefined, name: string): boolean {
+function setHeader(headers: Record<string, string>, name: string, value: string | undefined): void {
   const lowerName = name.toLowerCase()
-  return Object.keys(headers ?? {}).some(key => key.toLowerCase() === lowerName)
+  for (const existingName of Object.keys(headers)) {
+    if (existingName.toLowerCase() === lowerName) delete headers[existingName]
+  }
+  if (value !== undefined) headers[name] = value
 }
 
 function stableHeaderKey(headers: Record<string, string>): string {
   return JSON.stringify(
     Object.fromEntries(
-      Object.entries(headers).sort(([left], [right]) => left.localeCompare(right))
+      Object.entries(headers)
+        .map(([name, value]) => [name.toLowerCase(), value] as const)
+        .sort(([left], [right]) => left.localeCompare(right))
     )
   )
 }

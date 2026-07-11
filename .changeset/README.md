@@ -21,5 +21,11 @@ project in
   Pick a bump type (`patch` / `minor` / `major`) and write a short summary.
 
 - On push to `main`, the Release workflow opens (or updates) a "Version
-  Packages" PR. Merging that PR bumps the version, updates `CHANGELOG.md`, and
-  publishes to npm (requires the `NPM_TOKEN` secret).
+  Packages" PR. Merging that PR bumps the version and updates `CHANGELOG.md`;
+  the subsequent `main` run publishes versions not yet on npm.
+
+- Publishing uses npm trusted publishing through GitHub OIDC (`id-token:
+  write`) with provenance enabled. The workflow does not consume a long-lived
+  npm token. The npm package's Trusted Publisher settings must identify this
+  GitHub repository and `.github/workflows/release.yml`. If an environment
+  constraint is added to the workflow, the npm setting must match it.

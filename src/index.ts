@@ -26,3 +26,8 @@ export {
   type MixlayerWebSocketFetch,
   type MixlayerWebSocketFetchOptions,
 } from './mixlayer-websocket-fetch'
+
+export {
+  MIXLAYER_KNOWN_MODEL_IDS,
+  type MixlayerKnownModelId,
+} from './model-catalog'
