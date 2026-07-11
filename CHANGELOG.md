@@ -1,5 +1,13 @@
 # @runtypelabs/mixlayer-ai-provider
 
+## 2.1.0
+
+### Minor Changes
+
+- 1ab2d4e: - Export `MIXLAYER_KNOWN_MODEL_IDS` for consumers that need the provider's model catalog.
+  - Harden WebSocket response cancellation, closure, routing, and header handling.
+  - Validate Responses API HTTP and WebSocket transports in the live test matrix.
+
 ## 2.0.0
 
 ### Major Changes
