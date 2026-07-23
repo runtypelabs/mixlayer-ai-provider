@@ -13,14 +13,18 @@ import {
   MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL,
   MIXLAYER_RESPONSES_WEBSOCKET_BETA,
   MIXLAYER_KNOWN_MODEL_IDS,
+  MIXLAYER_VISION_MODEL_IDS,
   type MixlayerChatModelId,
+  type MixlayerVisionModelId,
   type MixlayerWebSocketConnectOptions,
   type MixlayerWebSocketConnection,
 } from '../src/index'
 
 const futureModelId: MixlayerChatModelId = 'future/model-not-in-snapshot'
+const visionModelId: MixlayerVisionModelId = 'qwen/qwen3.6-27b'
 
 void futureModelId
+void visionModelId
 
 class MockWebSocketConnection extends EventTarget implements MixlayerWebSocketConnection {
   readyState = 1
@@ -71,13 +75,28 @@ describe('MIXLAYER_KNOWN_MODEL_IDS', () => {
       'qwen/qwen3.5-397b-a17b',
       'qwen/qwen3.6-27b',
       'qwen/qwen3.6-35b-a3b',
-      'moonshotai/kimi-k2.6',
       'moonshotai/kimi-k2.7-code',
       'z-ai/glm-5.2',
     ])
     expect(new Set(MIXLAYER_KNOWN_MODEL_IDS).size).toBe(
       MIXLAYER_KNOWN_MODEL_IDS.length
     )
+  })
+
+  it('exports vision-capable ids as a known-model subset', () => {
+    expect(MIXLAYER_VISION_MODEL_IDS).toEqual([
+      'qwen/qwen3.5-4b-free',
+      'qwen/qwen3.5-9b',
+      'qwen/qwen3.5-35b-a3b',
+      'qwen/qwen3.5-397b-a17b',
+      'qwen/qwen3.6-27b',
+      'qwen/qwen3.6-35b-a3b',
+    ])
+    expect(
+      MIXLAYER_VISION_MODEL_IDS.every(modelId =>
+        MIXLAYER_KNOWN_MODEL_IDS.includes(modelId)
+      )
+    ).toBe(true)
   })
 })
 
@@ -102,6 +121,23 @@ function createResponsesSuccessBody(text = 'ok') {
       },
     ],
     usage: { input_tokens: 1, output_tokens: 1 },
+  }
+}
+
+function createChatSuccessBody(text = 'ok') {
+  return {
+    id: 'chatcmpl_1',
+    object: 'chat.completion',
+    created: 0,
+    model: 'qwen/qwen3.5-4b-free',
+    choices: [
+      {
+        index: 0,
+        message: { role: 'assistant', content: text },
+        finish_reason: 'stop',
+      },
+    ],
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
   }
 }
 
@@ -253,6 +289,104 @@ describe('createMixlayer', () => {
 
     expect(result.text).toBe('ok')
     expect(authorizations).toEqual(['Bearer real-mixlayer-token'])
+  })
+
+  it('serializes AI SDK image file parts for Chat Completions', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const provider = createMixlayer({
+      apiKey: 'test',
+      thinking: false,
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify(createChatSuccessBody('MXL7')), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    const result = await generateText({
+      model: provider.chat('qwen/qwen3.5-4b-free'),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Read the code.' },
+            {
+              type: 'file',
+              mediaType: 'image/png',
+              data: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(result.text).toBe('MXL7')
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Read the code.' },
+            {
+              type: 'image_url',
+              image_url: {
+                url: expect.stringMatching(/^data:image\/png;base64,/),
+              },
+            },
+          ],
+        },
+      ],
+    })
+  })
+
+  it('serializes AI SDK image file parts for Responses', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const provider = createMixlayer({
+      apiKey: 'test',
+      thinking: false,
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify(createResponsesSuccessBody('MXL7')), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    const result = await generateText({
+      model: provider.responses('qwen/qwen3.5-4b-free'),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Read the code.' },
+            {
+              type: 'file',
+              mediaType: 'image/png',
+              data: Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]),
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(result.text).toBe('MXL7')
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({
+      input: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'Read the code.' },
+            {
+              type: 'input_image',
+              image_url: expect.stringMatching(/^data:image\/png;base64,/),
+            },
+          ],
+        },
+      ],
+    })
   })
 
   it('disables Responses reasoning by default when thinking is false', async () => {
