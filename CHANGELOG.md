@@ -1,5 +1,12 @@
 # @runtypelabs/mixlayer-ai-provider
 
+## 2.2.0
+
+### Minor Changes
+
+- a4c0e99: Expose the known vision-capable model snapshot, document standard AI SDK image
+  inputs, and refresh the live Mixlayer model catalog.
+
 ## 2.1.0
 
 ### Minor Changes
