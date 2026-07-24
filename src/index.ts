@@ -29,5 +29,7 @@ export {
 
 export {
   MIXLAYER_KNOWN_MODEL_IDS,
+  MIXLAYER_VISION_MODEL_IDS,
   type MixlayerKnownModelId,
+  type MixlayerVisionModelId,
 } from './model-catalog'

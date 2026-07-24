@@ -1,10 +1,9 @@
 // @runtypelabs/mixlayer-ai-provider — an AI SDK provider for Mixlayer.
 //
 // Mixlayer serves open-weight models over an OpenAI-compatible inference API at
-// https://models.mixlayer.ai/v1. Today the catalog is the Qwen 3.5 / 3.6 family,
-// but Mixlayer is expected to add other open-weight families (e.g. Kimi) over
-// time — so this provider is model-family-agnostic and only layers
-// family-specific sampling defaults on models it recognizes.
+// https://models.mixlayer.ai/v1. The catalog spans Qwen, Kimi, and GLM models
+// and grows over time, so this provider is model-family-agnostic and only
+// layers family-specific behavior on models it recognizes.
 //
 // It wraps `@ai-sdk/openai-compatible` for Chat Completions and
 // `@ai-sdk/openai` for Responses API models with everything that makes
@@ -15,6 +14,7 @@
 //     defaults server-side, so the provider no longer injects them)
 //   - reasoning middleware that extracts `<think>` tags into AI SDK reasoning
 //     parts (the provider also emits native `reasoning_content`)
+//   - image input for vision-capable models through standard AI SDK file parts
 //   - OpenAI Responses API models, which can be paired with
 //     `createMixlayerWebSocketFetch()` for Responses WebSocket streaming
 //   - tolerant model-id handling (strips a leading `mixlayer/` prefix)
@@ -230,7 +230,8 @@ export type MixlayerLanguageModelId = MixlayerChatModelId
 /**
  * A Mixlayer provider. Callable directly (`mixlayer(modelId)`) and via the
  * standard AI SDK accessors. Works with `createProviderRegistry` for language
- * models. (Mixlayer is text-generation only today — no embedding models.)
+ * models. Vision-capable entries accept image input through standard AI SDK
+ * file parts. This provider exposes language models only, not embeddings.
  */
 export interface MixlayerProvider {
   (modelId: MixlayerChatModelId): LanguageModelV4

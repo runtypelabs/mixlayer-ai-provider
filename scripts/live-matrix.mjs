@@ -9,7 +9,7 @@ import {
   streamText,
   tool,
 } from 'ai'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
@@ -34,8 +34,10 @@ try {
 const {
   MIXLAYER_DEFAULT_BASE_URL,
   MIXLAYER_KNOWN_MODEL_IDS,
+  MIXLAYER_VISION_MODEL_IDS,
   createMixlayer,
   createMixlayerWebSocketFetch,
+  extractMixlayerModelId,
   isQwen35Or36,
 } = providerModule
 
@@ -73,6 +75,10 @@ const outputPath = resolve(
 )
 const includeStructured = args.structured !== false
 const includeTools = args.tools === true
+const includeVision = args.vision === true
+const visionFixture = includeVision
+  ? await readFile(resolve(__dirname, 'fixtures/vision-color-bands.png'))
+  : undefined
 
 const selectedModes = parseAllowedList(args.modes, LIVE_MODES, 'mode')
 const selectedTransports = parseAllowedList(
@@ -82,7 +88,7 @@ const selectedTransports = parseAllowedList(
 )
 const selectedThinkingModes = parseThinkingModes(args.thinking, [true, false])
 const cases = selectCases(
-  buildCases({ includeStructured, includeTools }),
+  buildCases({ includeStructured, includeTools, includeVision, visionFixture }),
   parseList(args.cases)
 )
 const models = await resolveModels()
@@ -93,6 +99,7 @@ const tasks = createLiveTasks({
   transports: selectedTransports,
   cases,
   modes: selectedModes,
+  normalizeModelId: extractMixlayerModelId,
 })
 
 console.log(`Mixlayer live matrix`)
@@ -196,7 +203,7 @@ async function runTask(task, index, total) {
     const model =
       task.testCase.viaRegistry === true
         ? createProviderRegistry({ mixlayer: provider }).languageModel(
-            `mixlayer:${task.modelId}`
+            `mixlayer:${extractMixlayerModelId(task.modelId)}`
           )
         : task.transport === 'chat'
           ? provider(task.modelId)
@@ -383,7 +390,7 @@ async function runStream(callOptions) {
   })
 }
 
-function buildCases({ includeStructured, includeTools }) {
+function buildCases({ includeStructured, includeTools, includeVision, visionFixture }) {
   const cases = [
     {
       id: 'default',
@@ -731,10 +738,53 @@ function buildCases({ includeStructured, includeTools }) {
     })
   }
 
+  if (includeVision) {
+    cases.push({
+      id: 'vision',
+      description:
+        'Inline PNG image understanding through standard AI SDK file parts.',
+      modes: ['generate', 'stream'],
+      transports: ['chat', 'responses-http', 'responses-websocket'],
+      thinkingModes: [false],
+      modelIds: [...MIXLAYER_VISION_MODEL_IDS],
+      options: () => ({
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'List the four vertical color bands from left to right. Answer with only the four color names.',
+              },
+              {
+                type: 'file',
+                mediaType: 'image/png',
+                data: visionFixture,
+              },
+            ],
+          },
+        ],
+        maxOutputTokens: 128,
+      }),
+      assertOutput: output => [
+        ...assertTextOrReasoning(output),
+        passIf(
+          /red.*green.*blue.*yellow/i.test(String(output.textSample ?? '')),
+          'model identified the four image colors in order',
+          `model did not identify the image colors in order: ${JSON.stringify(
+            output.textSample
+          )}`
+        ),
+      ],
+    })
+  }
+
   return cases
 }
 
 function assertRequest({ task, calls, output }) {
+  const expectedModelId = extractMixlayerModelId(task.modelId)
+
   if (task.transport === 'responses-http') {
     const responsesCall = calls.find(
       call =>
@@ -754,8 +804,8 @@ function assertRequest({ task, calls, output }) {
     const body = responsesCall.requestBody ?? {}
     assertions.push(
       passIf(
-        body.model === task.modelId,
-        `request model was ${task.modelId}`,
+        body.model === expectedModelId,
+        `request model was ${expectedModelId}`,
         `request model mismatch: ${body.model}`
       )
     )
@@ -768,6 +818,7 @@ function assertRequest({ task, calls, output }) {
         )
       )
     }
+    assertions.push(...assertVisionRequest(body, task))
     return assertions
   }
 
@@ -790,13 +841,14 @@ function assertRequest({ task, calls, output }) {
               `outgoing event type mismatch: ${body.type}`
             ),
             passIf(
-              body.model === task.modelId,
-              `request model was ${task.modelId}`,
+              body.model === expectedModelId,
+              `request model was ${expectedModelId}`,
               `request model mismatch: ${body.model}`
             ),
           ]
         : []),
       ...assertTextOrReasoning(output),
+      ...assertVisionRequest(body, task),
     ]
   }
 
@@ -812,8 +864,8 @@ function assertRequest({ task, calls, output }) {
   const body = chatCall.requestBody ?? {}
   assertions.push(
     passIf(
-      body.model === task.modelId,
-      `request model was ${task.modelId}`,
+      body.model === expectedModelId,
+      `request model was ${expectedModelId}`,
       `request model mismatch: ${body.model}`
     )
   )
@@ -823,6 +875,8 @@ function assertRequest({ task, calls, output }) {
       passIf(body.stream === true, 'stream=true was sent', 'stream request omitted stream=true')
     )
   }
+
+  assertions.push(...assertVisionRequest(body, task))
 
   if (!hasExpectedBodyKey(task.testCase, 'min_p')) {
     assertions.push(
@@ -924,6 +978,47 @@ function assertTextOrReasoning(output) {
       'model returned no text or reasoning content'
     ),
   ]
+}
+
+function assertVisionRequest(body, task) {
+  if (task.testCase.id !== 'vision') return []
+
+  const imagePart = findNestedValue(
+    body,
+    value =>
+      value != null &&
+      typeof value === 'object' &&
+      (value.type === 'image_url' || value.type === 'input_image')
+  )
+  const imageUrl =
+    typeof imagePart?.image_url === 'string'
+      ? imagePart.image_url
+      : imagePart?.image_url?.url
+
+  return [
+    passIf(
+      typeof imageUrl === 'string' &&
+        imageUrl.startsWith('data:image/png;base64,'),
+      'serialized the AI SDK image as an inline PNG data URL',
+      `missing inline PNG image part: ${JSON.stringify(imagePart)}`
+    ),
+  ]
+}
+
+function findNestedValue(value, predicate) {
+  if (predicate(value)) return value
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const match = findNestedValue(item, predicate)
+      if (match !== undefined) return match
+    }
+  } else if (value != null && typeof value === 'object') {
+    for (const item of Object.values(value)) {
+      const match = findNestedValue(item, predicate)
+      if (match !== undefined) return match
+    }
+  }
+  return undefined
 }
 
 function extractWarningsFromOutput(output) {
@@ -1101,13 +1196,27 @@ function parseRequestBody(body) {
   if (body == null) return undefined
   if (typeof body === 'string') {
     try {
-      return JSON.parse(body)
+      return summarizeDataUrls(JSON.parse(body))
     } catch {
       return redact(body)
     }
   }
 
   return '[non-string body]'
+}
+
+function summarizeDataUrls(value) {
+  if (typeof value === 'string') {
+    const match = /^(data:[^;,]+;base64,)(.+)$/s.exec(value)
+    return match ? `${match[1]}[${match[2].length} base64 chars]` : value
+  }
+  if (Array.isArray(value)) return value.map(summarizeDataUrls)
+  if (value != null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, summarizeDataUrls(item)])
+    )
+  }
+  return value
 }
 
 function logProgress(index, total, status, label, durationMs) {
@@ -1175,11 +1284,12 @@ Options:
   --output=path                 JSON report path.
   --structured=false            Skip structured output case.
   --tools                       Include prompt-guided tool-calling cases. Defaults to off.
+  --vision                      Include image-input cases on known vision models. Defaults to off.
   --allow-known-models-fallback Use the package's known model list if /models fails.
   --fail-fast                   Stop scheduling new tasks after the first failure.
 
 Case ids:
-  ${buildCases({ includeStructured: true, includeTools: true })
+  ${buildCases({ includeStructured: true, includeTools: true, includeVision: true })
     .map(testCase => testCase.id)
     .join(', ')}
 `)

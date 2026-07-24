@@ -6,6 +6,7 @@ import { resolve } from 'node:path'
 
 const SOURCE_FILE = resolve('src/model-catalog.ts')
 const CATALOG_NAME = 'MIXLAYER_KNOWN_MODEL_IDS'
+const VISION_CATALOG_NAME = 'MIXLAYER_VISION_MODEL_IDS'
 const DEFAULT_BASE_URL = 'https://models.mixlayer.ai/v1'
 
 const apiKey = process.env.MIXLAYER_API_KEY
@@ -15,14 +16,23 @@ if (!apiKey) {
   fail('MIXLAYER_API_KEY is required to validate the live Mixlayer model catalog.')
 }
 
-const localModels = await readRuntimeCatalog()
+const localModels = await readRuntimeCatalog(CATALOG_NAME)
+const visionModels = await readRuntimeCatalog(VISION_CATALOG_NAME)
 const liveModels = await fetchLiveModels()
+const unknownVisionModels = visionModels.filter(model => !localModels.includes(model))
+
+if (unknownVisionModels.length > 0) {
+  fail(
+    `${VISION_CATALOG_NAME} contains model id(s) outside ${CATALOG_NAME}: ${unknownVisionModels.join(', ')}`
+  )
+}
 
 const missingFromCatalog = liveModels.filter(model => !localModels.includes(model))
 const staleCatalog = localModels.filter(model => !liveModels.includes(model))
 
 console.log(`Live Mixlayer models: ${liveModels.length}`)
 console.log(`Runtime catalog models: ${localModels.length}`)
+console.log(`Known vision models: ${visionModels.length}`)
 
 if (missingFromCatalog.length > 0 || staleCatalog.length > 0) {
   if (missingFromCatalog.length > 0) {
@@ -51,7 +61,7 @@ if (missingFromCatalog.length > 0 || staleCatalog.length > 0) {
 
 console.log(`${CATALOG_NAME} matches the live Mixlayer model catalog.`)
 
-async function readRuntimeCatalog() {
+async function readRuntimeCatalog(catalogName) {
   const sourceText = await readFile(SOURCE_FILE, 'utf8')
   const sourceFile = ts.createSourceFile(
     SOURCE_FILE,
@@ -66,40 +76,40 @@ async function readRuntimeCatalog() {
     if (!ts.isVariableStatement(node)) return
 
     for (const declaration of node.declarationList.declarations) {
-      if (ts.isIdentifier(declaration.name) && declaration.name.text === CATALOG_NAME) {
+      if (ts.isIdentifier(declaration.name) && declaration.name.text === catalogName) {
         catalogNode = declaration
       }
     }
   })
 
   if (!catalogNode) {
-    fail(`Could not find runtime catalog ${CATALOG_NAME} in ${SOURCE_FILE}.`)
+    fail(`Could not find runtime catalog ${catalogName} in ${SOURCE_FILE}.`)
   }
 
   if (!catalogNode.initializer) {
-    fail(`${CATALOG_NAME} has no initializer in ${SOURCE_FILE}.`)
+    fail(`${catalogName} has no initializer in ${SOURCE_FILE}.`)
   }
 
   const initializer = unwrapExpression(catalogNode.initializer)
   if (!ts.isArrayLiteralExpression(initializer)) {
-    fail(`${CATALOG_NAME} initializer must be an array literal.`)
+    fail(`${catalogName} initializer must be an array literal.`)
   }
 
   const modelIds = initializer.elements.map(element => {
     if (!ts.isStringLiteral(element)) {
-      fail(`${CATALOG_NAME} must contain only string literal model ids.`)
+      fail(`${catalogName} must contain only string literal model ids.`)
     }
     return element.text
   })
 
   if (modelIds.length === 0) {
-    fail(`${CATALOG_NAME} must not be empty.`)
+    fail(`${catalogName} must not be empty.`)
   }
 
   const duplicates = modelIds.filter((model, index) => modelIds.indexOf(model) !== index)
   if (duplicates.length > 0) {
     fail(
-      `${CATALOG_NAME} contains duplicate model id(s): ${[...new Set(duplicates)].join(', ')}`
+      `${catalogName} contains duplicate model id(s): ${[...new Set(duplicates)].join(', ')}`
     )
   }
 
@@ -107,7 +117,11 @@ async function readRuntimeCatalog() {
 }
 
 function unwrapExpression(node) {
-  while (ts.isAsExpression(node) || ts.isParenthesizedExpression(node)) {
+  while (
+    ts.isAsExpression(node) ||
+    ts.isSatisfiesExpression(node) ||
+    ts.isParenthesizedExpression(node)
+  ) {
     node = node.expression
   }
   return node

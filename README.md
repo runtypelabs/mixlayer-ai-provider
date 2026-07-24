@@ -5,9 +5,9 @@
 
 An [AI SDK](https://sdk.vercel.ai) provider for [Mixlayer](https://www.mixlayer.com/) —
 fast, open-weight model inference served over an OpenAI-compatible endpoint.
-Mixlayer's catalog is currently the [Qwen](https://qwenlm.github.io) 3.5 / 3.6
-family and grows over time; this provider is model-family-agnostic and only
-layers family-specific tuning on models it recognizes.
+Mixlayer's catalog spans Qwen, Kimi, and GLM models and grows over time; this
+provider is model-family-agnostic and only layers family-specific behavior on
+models it recognizes.
 
 It wraps [`@ai-sdk/openai-compatible`](https://www.npmjs.com/package/@ai-sdk/openai-compatible)
 for Chat Completions and [`@ai-sdk/openai`](https://www.npmjs.com/package/@ai-sdk/openai)
@@ -19,6 +19,7 @@ correctly out of the box:
   `reasoning.effort`), scoped to the Qwen 3.5 / 3.6 models
 - reasoning support — `<think>` tags and native `reasoning_content` both surface
   as AI SDK reasoning parts
+- image input through standard AI SDK file parts on vision-capable models
 - Responses API models and a Responses WebSocket `fetch` adapter for lower
   latency streaming on repeat calls
 - tolerant model-id handling (strips a leading `mixlayer/` prefix)
@@ -62,6 +63,38 @@ const provider = createMixlayer({
 
 const model = provider('qwen/qwen3.5-9b')
 ```
+
+### Vision
+
+Models in `MIXLAYER_VISION_MODEL_IDS` accept image inputs through standard AI
+SDK file parts. The same message shape works with Chat Completions and
+Responses models:
+
+```ts
+import { readFile } from 'node:fs/promises'
+import { generateText } from 'ai'
+import { mixlayer } from '@runtypelabs/mixlayer-ai-provider'
+
+const image = await readFile('./diagram.png')
+const result = await generateText({
+  model: mixlayer('qwen/qwen3.6-27b'),
+  messages: [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'What does this diagram show?' },
+        { type: 'file', mediaType: 'image/png', data: image },
+      ],
+    },
+  ],
+})
+
+console.log(result.text)
+```
+
+Mixlayer also accepts supported remote image URLs. See the
+[Mixlayer vision guide](https://docs.mixlayer.com/vision) for current formats
+and limits. Text-only models return a media error when sent an image.
 
 ### Responses API and WebSocket mode
 
@@ -141,12 +174,15 @@ const model = registry.languageModel('mixlayer:qwen/qwen3.6-27b')
 
 Pass any model id from Mixlayer's catalog — see the
 [Mixlayer models page](https://docs.mixlayer.com/models) for the live list and
-pricing. Ids look like `qwen/qwen3.6-27b` or `moonshotai/kimi-k2.6`.
+pricing. Ids look like `qwen/qwen3.6-27b` or
+`moonshotai/kimi-k2.7-code`.
 
 `MIXLAYER_KNOWN_MODEL_IDS` is the package's readonly snapshot of known ids for
 editor autocomplete and offline tooling. `MixlayerChatModelId` derives its
 known members from that snapshot but remains open — any model id string is
 accepted, so new models and future families work without a package update.
+`MIXLAYER_VISION_MODEL_IDS` is the corresponding conservative snapshot for
+models validated with image input; `MixlayerVisionModelId` derives from it.
 
 ## Sampling and thinking
 
@@ -177,6 +213,7 @@ API rejects the Chat Completions-only `thinking` field.
 | `createMixlayer(settings)`                                      | Provider factory                                                 |
 | `createMixlayerWebSocketFetch(options?)`                        | Fetch adapter for Responses API streaming over WebSocket         |
 | `MIXLAYER_KNOWN_MODEL_IDS`                                     | Readonly snapshot of known model ids                              |
+| `MIXLAYER_VISION_MODEL_IDS`                                    | Readonly snapshot of known image-input model ids                  |
 | `extractMixlayerModelId(id)`                                    | Strips a leading `mixlayer/` prefix                              |
 | `isQwen35Or36(modelId)`                                         | Whether an id is a Qwen 3.5 / 3.6 model (the scoped generations) |
 | `applyQwenThinking(body, thinking?)`                            | Sets the `thinking` field on a request body, scoped to Qwen 3.5 / 3.6 |

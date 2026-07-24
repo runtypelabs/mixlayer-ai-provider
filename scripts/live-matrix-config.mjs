@@ -9,49 +9,41 @@ export function parseAllowedList(value, allowed, label) {
   return selected
 }
 
-export function createLiveTasks({ models, thinkingModes, transports, cases, modes }) {
+export function createLiveTasks({
+  models,
+  thinkingModes,
+  transports,
+  cases,
+  modes,
+  normalizeModelId = modelId => modelId,
+}) {
   const tasks = []
 
   for (const modelId of models) {
+    const capabilityModelId = normalizeModelId(modelId)
     for (const thinking of thinkingModes) {
-      if (transports.includes('chat')) {
+      for (const transport of transports) {
+        if (transport === 'responses-websocket' && !modes.includes('stream')) {
+          continue
+        }
+
         for (const testCase of cases) {
           if (testCase.thinkingModes && !testCase.thinkingModes.includes(thinking)) {
             continue
           }
+          if (testCase.modelIds && !testCase.modelIds.includes(capabilityModelId)) {
+            continue
+          }
+          if (!supportsTransport(testCase, transport)) {
+            continue
+          }
+
           for (const mode of modes) {
-            if (testCase.modes.includes(mode)) {
-              tasks.push({ modelId, thinking, testCase, mode, transport: 'chat' })
-            }
+            if (!testCase.modes.includes(mode)) continue
+            if (transport === 'responses-websocket' && mode !== 'stream') continue
+            tasks.push({ modelId, thinking, testCase, mode, transport })
           }
         }
-      }
-
-      const defaultCase = cases.find(testCase => testCase.id === 'default')
-      if (!defaultCase) continue
-
-      if (transports.includes('responses-http')) {
-        for (const mode of modes) {
-          if (defaultCase.modes.includes(mode)) {
-            tasks.push({
-              modelId,
-              thinking,
-              testCase: defaultCase,
-              mode,
-              transport: 'responses-http',
-            })
-          }
-        }
-      }
-
-      if (transports.includes('responses-websocket') && modes.includes('stream')) {
-        tasks.push({
-          modelId,
-          thinking,
-          testCase: defaultCase,
-          mode: 'stream',
-          transport: 'responses-websocket',
-        })
       }
     }
   }
@@ -65,6 +57,11 @@ export function createLiveTasks({ models, thinkingModes, transports, cases, mode
   }
 
   return tasks
+}
+
+function supportsTransport(testCase, transport) {
+  if (testCase.transports) return testCase.transports.includes(transport)
+  return transport === 'chat' || testCase.id === 'default'
 }
 
 function parseList(value, fallback = []) {
