@@ -9,10 +9,18 @@ export function parseAllowedList(value, allowed, label) {
   return selected
 }
 
-export function createLiveTasks({ models, thinkingModes, transports, cases, modes }) {
+export function createLiveTasks({
+  models,
+  thinkingModes,
+  transports,
+  cases,
+  modes,
+  normalizeModelId = modelId => modelId,
+}) {
   const tasks = []
 
   for (const modelId of models) {
+    const capabilityModelId = normalizeModelId(modelId)
     for (const thinking of thinkingModes) {
       for (const transport of transports) {
         if (transport === 'responses-websocket' && !modes.includes('stream')) {
@@ -23,7 +31,7 @@ export function createLiveTasks({ models, thinkingModes, transports, cases, mode
           if (testCase.thinkingModes && !testCase.thinkingModes.includes(thinking)) {
             continue
           }
-          if (testCase.modelIds && !testCase.modelIds.includes(modelId)) {
+          if (testCase.modelIds && !testCase.modelIds.includes(capabilityModelId)) {
             continue
           }
           if (!supportsTransport(testCase, transport)) {

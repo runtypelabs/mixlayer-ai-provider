@@ -79,6 +79,31 @@ describe('live matrix configuration', () => {
     ])
   })
 
+  it('normalizes routed model ids for capability filtering', () => {
+    const visionCase = {
+      id: 'vision',
+      modes: ['generate'],
+      transports: ['chat'],
+      modelIds: ['qwen/qwen3.6-27b'],
+    }
+    const tasks = createLiveTasks({
+      models: [
+        'mixlayer/qwen/qwen3.6-27b',
+        'mixlayer:qwen/qwen3.6-27b',
+      ],
+      thinkingModes: [false],
+      transports: ['chat'],
+      cases: [visionCase],
+      modes: ['generate'],
+      normalizeModelId: modelId => modelId.replace(/^mixlayer[/:]/, ''),
+    })
+
+    expect(tasks.map(task => task.modelId)).toEqual([
+      'mixlayer/qwen/qwen3.6-27b',
+      'mixlayer:qwen/qwen3.6-27b',
+    ])
+  })
+
   it('rejects unknown modes', () => {
     expect(() => parseAllowedList('generate,typo', LIVE_MODES, 'mode')).toThrow(
       'Unknown mode(s): typo'

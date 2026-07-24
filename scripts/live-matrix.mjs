@@ -37,6 +37,7 @@ const {
   MIXLAYER_VISION_MODEL_IDS,
   createMixlayer,
   createMixlayerWebSocketFetch,
+  extractMixlayerModelId,
   isQwen35Or36,
 } = providerModule
 
@@ -98,6 +99,7 @@ const tasks = createLiveTasks({
   transports: selectedTransports,
   cases,
   modes: selectedModes,
+  normalizeModelId: extractMixlayerModelId,
 })
 
 console.log(`Mixlayer live matrix`)
@@ -201,7 +203,7 @@ async function runTask(task, index, total) {
     const model =
       task.testCase.viaRegistry === true
         ? createProviderRegistry({ mixlayer: provider }).languageModel(
-            `mixlayer:${task.modelId}`
+            `mixlayer:${extractMixlayerModelId(task.modelId)}`
           )
         : task.transport === 'chat'
           ? provider(task.modelId)
@@ -781,6 +783,8 @@ function buildCases({ includeStructured, includeTools, includeVision, visionFixt
 }
 
 function assertRequest({ task, calls, output }) {
+  const expectedModelId = extractMixlayerModelId(task.modelId)
+
   if (task.transport === 'responses-http') {
     const responsesCall = calls.find(
       call =>
@@ -800,8 +804,8 @@ function assertRequest({ task, calls, output }) {
     const body = responsesCall.requestBody ?? {}
     assertions.push(
       passIf(
-        body.model === task.modelId,
-        `request model was ${task.modelId}`,
+        body.model === expectedModelId,
+        `request model was ${expectedModelId}`,
         `request model mismatch: ${body.model}`
       )
     )
@@ -837,8 +841,8 @@ function assertRequest({ task, calls, output }) {
               `outgoing event type mismatch: ${body.type}`
             ),
             passIf(
-              body.model === task.modelId,
-              `request model was ${task.modelId}`,
+              body.model === expectedModelId,
+              `request model was ${expectedModelId}`,
               `request model mismatch: ${body.model}`
             ),
           ]
@@ -860,8 +864,8 @@ function assertRequest({ task, calls, output }) {
   const body = chatCall.requestBody ?? {}
   assertions.push(
     passIf(
-      body.model === task.modelId,
-      `request model was ${task.modelId}`,
+      body.model === expectedModelId,
+      `request model was ${expectedModelId}`,
       `request model mismatch: ${body.model}`
     )
   )
