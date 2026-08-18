@@ -1,5 +1,11 @@
 # @runtypelabs/mixlayer-ai-provider
 
+## 2.2.1
+
+### Patch Changes
+
+- bcba054: Update package author to the current legal entity name, Runtype, Inc.
+
 ## 2.2.0
 
 ### Minor Changes
