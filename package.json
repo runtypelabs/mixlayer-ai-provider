@@ -62,7 +62,7 @@
     "provider",
     "openai-compatible"
   ],
-  "author": "Runtype Labs",
+  "author": "Runtype, Inc.",
   "license": "MIT",
   "repository": {
     "type": "git",
