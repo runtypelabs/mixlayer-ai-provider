@@ -36,7 +36,7 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { createOpenAI } from '@ai-sdk/openai'
 import { wrapLanguageModel, extractReasoningMiddleware } from 'ai'
 import type { LanguageModelMiddleware } from 'ai'
-import type { LanguageModelV4 } from '@ai-sdk/provider'
+import { NoSuchModelError, type LanguageModelV4, type ProviderV4 } from '@ai-sdk/provider'
 import { MIXLAYER_DEFAULT_BASE_URL } from './constants'
 import type { MixlayerKnownModelId } from './model-catalog'
 
@@ -233,7 +233,7 @@ export type MixlayerLanguageModelId = MixlayerChatModelId
  * models. Vision-capable entries accept image input through standard AI SDK
  * file parts. This provider exposes language models only, not embeddings.
  */
-export interface MixlayerProvider {
+export interface MixlayerProvider extends ProviderV4 {
   (modelId: MixlayerChatModelId): LanguageModelV4
   languageModel(modelId: MixlayerChatModelId): LanguageModelV4
   /** Creates a Chat Completions API model. */
@@ -242,6 +242,10 @@ export interface MixlayerProvider {
   responses(modelId: MixlayerChatModelId): LanguageModelV4
   chatModel(modelId: MixlayerChatModelId): LanguageModelV4
   responsesModel(modelId: MixlayerChatModelId): LanguageModelV4
+  /** Embeddings are not exposed by this provider. Always throws NoSuchModelError. */
+  embeddingModel(modelId: string): never
+  /** Image generation is not exposed by this provider. Always throws NoSuchModelError. */
+  imageModel(modelId: string): never
 }
 
 /**
@@ -309,12 +313,19 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
   const createDefaultModel =
     settings.defaultModelApi === 'responses' ? createResponsesModel : createChatModel
 
-  const provider = ((modelId: string) => createDefaultModel(modelId)) as MixlayerProvider
+  const provider = (modelId: MixlayerChatModelId) => createDefaultModel(modelId)
+  provider.specificationVersion = 'v4' as const
   provider.languageModel = createDefaultModel
   provider.chat = createChatModel
   provider.responses = createResponsesModel
   provider.chatModel = createChatModel
   provider.responsesModel = createResponsesModel
+  provider.embeddingModel = (modelId: string): never => {
+    throw new NoSuchModelError({ modelId, modelType: 'embeddingModel' })
+  }
+  provider.imageModel = (modelId: string): never => {
+    throw new NoSuchModelError({ modelId, modelType: 'imageModel' })
+  }
   return provider
 }
 

@@ -9,3 +9,6 @@ for compatible provider types, while preserving Node.js 22 support.
 
 Preserve upstream WebSocket error details when Mixlayer omits the sequence
 number required by the Responses streaming schema.
+
+Implement the AI SDK provider-registry contract so typed registry usage works
+and unsupported embedding or image-generation requests return NoSuchModelError.
