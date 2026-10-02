@@ -1,7 +1,7 @@
 // @runtypelabs/mixlayer-ai-provider — an AI SDK provider for Mixlayer.
 //
 // Mixlayer serves open-weight models over an OpenAI-compatible inference API at
-// https://models.mixlayer.ai/v1. The catalog spans Qwen, Kimi, and GLM models
+// https://models.mixlayer.ai/v1. The catalog spans Qwen and GLM models
 // and grows over time, so this provider is model-family-agnostic and only
 // layers family-specific behavior on models it recognizes.
 //
@@ -212,8 +212,8 @@ export interface MixlayerProviderSettings {
 
 /**
  * Known Mixlayer chat model ids (current catalog). The `(string & {})` member
- * keeps the union open: Mixlayer adds models over time and is expected to serve
- * non-Qwen families (e.g. Kimi) in future, so any model id string is accepted —
+ * keeps the union open: Mixlayer adds models and model families over time,
+ * so any model id string is accepted —
  * the listed ids just provide editor autocomplete.
  */
 export type MixlayerChatModelId =

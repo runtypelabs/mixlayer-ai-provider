@@ -72,11 +72,11 @@ describe('MIXLAYER_KNOWN_MODEL_IDS', () => {
       'qwen/qwen3.5-4b-free',
       'qwen/qwen3.5-9b',
       'qwen/qwen3.5-35b-a3b',
-      'qwen/qwen3.5-397b-a17b',
       'qwen/qwen3.6-27b',
       'qwen/qwen3.6-35b-a3b',
-      'moonshotai/kimi-k2.7-code',
+      'qwen/qwen3.8-27b',
       'z-ai/glm-5.2',
+      'z-ai/glm-5.3',
     ])
     expect(new Set(MIXLAYER_KNOWN_MODEL_IDS).size).toBe(
       MIXLAYER_KNOWN_MODEL_IDS.length
@@ -88,9 +88,9 @@ describe('MIXLAYER_KNOWN_MODEL_IDS', () => {
       'qwen/qwen3.5-4b-free',
       'qwen/qwen3.5-9b',
       'qwen/qwen3.5-35b-a3b',
-      'qwen/qwen3.5-397b-a17b',
       'qwen/qwen3.6-27b',
       'qwen/qwen3.6-35b-a3b',
+      'qwen/qwen3.8-27b',
     ])
     expect(
       MIXLAYER_VISION_MODEL_IDS.every(modelId =>

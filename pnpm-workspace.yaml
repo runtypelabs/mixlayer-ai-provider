@@ -1,8 +1,9 @@
 # esbuild ships a postinstall that downloads its platform binary; approve it
 # so `pnpm install --frozen-lockfile` doesn't halt on ERR_PNPM_IGNORED_BUILDS.
-# In pnpm 11.9+, `allowBuilds` (package -> boolean) is the approval mechanism
-# that takes precedence; `onlyBuiltDependencies` is kept for older pnpm / docs.
+# pnpm 12 uses `allowBuilds` for lifecycle-script approvals.
 allowBuilds:
   esbuild: true
-onlyBuiltDependencies:
-  - esbuild
+minimumReleaseAgeExclude:
+  - '@ai-sdk/gateway@4.0.103'
+  - '@types/node@22.20.5'
+  - ai@7.0.127

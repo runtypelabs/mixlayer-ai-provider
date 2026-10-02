@@ -243,6 +243,7 @@ export function createMixlayerWebSocketFetch(
     const responseStream = new ReadableStream<Uint8Array>({
       start(controller) {
         let abortHandler: (() => void) | undefined
+        let messageIndex = 0
 
         function removeListenersAndRelease() {
           connection.removeEventListener('message', onMessage)
@@ -279,9 +280,17 @@ export function createMixlayerWebSocketFetch(
         async function onMessage(event: Event) {
           try {
             const text = await eventDataToString(getEventData(event))
-            controller.enqueue(encoder.encode(`data: ${text}\n\n`))
+            const parsed = JSON.parse(text) as { type?: unknown; sequence_number?: unknown }
+            // Mixlayer's WebSocket errors may omit the sequence number required
+            // by the Responses SSE schema. Keep their error details intact so
+            // the SDK reports the upstream failure, not a schema-validation error.
+            const data =
+              parsed.type === 'error' && parsed.sequence_number === undefined
+                ? JSON.stringify({ ...parsed, sequence_number: messageIndex })
+                : text
+            messageIndex++
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`))
 
-            const parsed = JSON.parse(text) as { type?: unknown }
             if (
               typeof parsed.type === 'string' &&
               TERMINAL_RESPONSE_EVENT_TYPES.has(parsed.type)

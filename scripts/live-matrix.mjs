@@ -5,7 +5,7 @@ import {
   createProviderRegistry,
   generateText,
   jsonSchema,
-  stepCountIs,
+  isStepCount,
   streamText,
   tool,
 } from 'ai'
@@ -363,7 +363,7 @@ async function runStream(callOptions) {
   let reasoningText = ''
   const partCounts = {}
 
-  for await (const part of result.fullStream) {
+  for await (const part of result.stream) {
     partCounts[part.type] = (partCounts[part.type] ?? 0) + 1
     if (part.type === 'text-delta') text += part.text
     if (part.type === 'reasoning-delta') reasoningText += part.text
@@ -398,7 +398,8 @@ function buildCases({ includeStructured, includeTools, includeVision, visionFixt
       modes: ['generate', 'stream'],
       options: () => ({
         prompt: 'Reply with exactly: OK',
-        maxOutputTokens: 48,
+        // Always-on reasoning models need room to think before returning text.
+        maxOutputTokens: 512,
       }),
       assertOutput: assertTextOrReasoning,
     },
@@ -717,7 +718,7 @@ function buildCases({ includeStructured, includeTools, includeVision, visionFixt
             execute: async input => ({ echoed: input.marker }),
           }),
         },
-        stopWhen: stepCountIs(2),
+        stopWhen: isStepCount(2),
       }),
       assertOutput: output => [
         passIf(
@@ -764,7 +765,8 @@ function buildCases({ includeStructured, includeTools, includeVision, visionFixt
             ],
           },
         ],
-        maxOutputTokens: 128,
+        // Qwen 3.8 can reason before answering even with provider thinking=false.
+        maxOutputTokens: 1024,
       }),
       assertOutput: output => [
         ...assertTextOrReasoning(output),
