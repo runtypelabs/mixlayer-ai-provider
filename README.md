@@ -3,11 +3,10 @@
 [![npm](https://img.shields.io/npm/v/@runtypelabs/mixlayer-ai-provider.svg)](https://www.npmjs.com/package/@runtypelabs/mixlayer-ai-provider)
 [![license](https://img.shields.io/npm/l/@runtypelabs/mixlayer-ai-provider.svg)](./LICENSE)
 
-An [AI SDK](https://sdk.vercel.ai) provider for [Mixlayer](https://www.mixlayer.com/) —
-fast, open-weight model inference served over an OpenAI-compatible endpoint.
-Mixlayer's catalog spans Qwen, Kimi, and GLM models and grows over time; this
-provider is model-family-agnostic and only layers family-specific behavior on
-models it recognizes.
+An [AI SDK](https://sdk.vercel.ai) provider for [Mixlayer](https://www.mixlayer.com/),
+which serves open-weight models over an OpenAI-compatible endpoint.
+Mixlayer's current catalog includes Qwen and GLM models. This provider accepts
+any model id and adds family-specific behavior only for models it recognizes.
 
 It wraps [`@ai-sdk/openai-compatible`](https://www.npmjs.com/package/@ai-sdk/openai-compatible)
 for Chat Completions and [`@ai-sdk/openai`](https://www.npmjs.com/package/@ai-sdk/openai)
@@ -27,11 +26,12 @@ correctly out of the box:
 ## Install
 
 ```bash
-pnpm add @runtypelabs/mixlayer-ai-provider ai@^7
+pnpm add @runtypelabs/mixlayer-ai-provider ai@^7.0.127
 ```
 
-This package targets AI SDK v7 and is ESM-only. For Node.js applications, use
-Node.js 22+; the package itself avoids Node-only WebSocket dependencies so it
+This package requires AI SDK 7.0.127 or later in the v7 series and is ESM-only.
+For Node.js applications, use Node.js 22+. The package avoids Node-only
+WebSocket dependencies so it
 can be bundled for standards-based runtimes such as Cloudflare Workers. `ai` is
 a peer dependency, so your app dedupes a single AI SDK version.
 
@@ -42,7 +42,7 @@ import { mixlayer } from '@runtypelabs/mixlayer-ai-provider'
 import { streamText } from 'ai'
 
 const result = streamText({
-  model: mixlayer('qwen/qwen3.6-27b'),
+  model: mixlayer('qwen/qwen3.8-27b'),
   prompt: 'Explain reasoning models in one paragraph.',
 })
 
@@ -58,7 +58,7 @@ import { createMixlayer } from '@runtypelabs/mixlayer-ai-provider'
 
 const provider = createMixlayer({
   apiKey: process.env.MIXLAYER_API_KEY,
-  thinking: false, // disable Qwen thinking
+  thinking: false, // disable Qwen 3.5 / 3.6 thinking
 })
 
 const model = provider('qwen/qwen3.5-9b')
@@ -108,7 +108,7 @@ import { streamText } from 'ai'
 
 const provider = createMixlayer({
   apiKey: process.env.MIXLAYER_API_KEY,
-  thinking: false, // for Qwen Responses API calls, maps to reasoning.effort: 'none'
+  thinking: false, // for Qwen 3.5 / 3.6, maps to reasoning.effort: 'none'
 })
 
 const result = streamText({
@@ -172,32 +172,34 @@ const model = registry.languageModel('mixlayer:qwen/qwen3.6-27b')
 
 ## Models
 
-Pass any model id from Mixlayer's catalog — see the
-[Mixlayer models page](https://docs.mixlayer.com/models) for the live list and
-pricing. Ids look like `qwen/qwen3.6-27b` or
-`moonshotai/kimi-k2.7-code`.
+Pass any model id from Mixlayer's catalog, such as `qwen/qwen3.8-27b` or
+`z-ai/glm-5.3`. Use the [List models API](https://docs.mixlayer.com/api-reference/inference-ap-is/models/list-models)
+for the models available to your API key, or the
+[Mixlayer console](https://console.mixlayer.com/) for current availability and
+pricing. The [models overview](https://docs.mixlayer.com/models) describes the
+model families.
 
 `MIXLAYER_KNOWN_MODEL_IDS` is the package's readonly snapshot of known ids for
 editor autocomplete and offline tooling. `MixlayerChatModelId` derives its
-known members from that snapshot but remains open — any model id string is
-accepted, so new models and future families work without a package update.
+known members from that snapshot but remains open. It accepts any model id
+string, so new models and future families work without a package update.
 `MIXLAYER_VISION_MODEL_IDS` is the corresponding conservative snapshot for
 models validated with image input; `MixlayerVisionModelId` derives from it.
 
 ## Sampling and thinking
 
-Mixlayer applies each model's recommended sampling defaults **server-side** (see
-the [chat completions parameter reference](https://docs.mixlayer.com/chat-completions#sampling-parameters)
-and [per-model notes](https://docs.mixlayer.com/models#qwen-35)), so the
-provider does not inject any sampling parameters — only values you set on a
-request (`temperature`, `topP`, etc.) are sent.
+Mixlayer applies sampling defaults server-side. See the
+[chat completions parameter reference](https://docs.mixlayer.com/api-reference/inference-ap-is/chat-completions/chat-completions)
+and [Qwen 3.5 / 3.6 model notes](https://docs.mixlayer.com/qwen-3-5#mixlayer-platform-defaults).
+The provider sends only the sampling parameters you set on a request, such as
+`temperature` and `topP`.
 
 For Chat Completions models (`provider(id)`, `provider.chat(id)`, and
 `provider.chatModel(id)`), the provider sends Mixlayer's documented `thinking`
-request field based on the `thinking` setting. It applies **only to Qwen 3.5 /
-3.6 models**, so later Qwen generations and other model families pass through
-untouched; a `thinking` value you set on the request body yourself wins. Use the
-exported `isQwen35Or36(modelId)` helper if you need the same predicate.
+request field based on the `thinking` setting. It applies only to Qwen 3.5 and
+3.6 models. Qwen 3.8 and other model families pass through without an injected
+thinking setting. A `thinking` value you set on the request body yourself wins.
+Use the exported `isQwen35Or36(modelId)` helper if you need the same predicate.
 
 Responses API models (`provider.responses(id)`) use the OpenAI Responses request
 shape so they remain compatible with Mixlayer's Responses HTTP and WebSocket
@@ -236,7 +238,7 @@ The provider also exposes:
 | `headers`         | `Record<string,string>` | —                           | Extra headers sent with every request                                    |
 | `fetch`           | `typeof fetch`         | `globalThis.fetch`          | Custom fetch; pass `createMixlayerWebSocketFetch()` for WS streaming     |
 | `includeUsage`    | `boolean`              | —                           | Include usage information in streaming Chat Completions responses        |
-| `thinking`        | `boolean`              | `true`                      | Qwen thinking toggle (`thinking` field); Responses uses `reasoning.effort: 'none'` for `false` |
+| `thinking`        | `boolean`              | `true`                      | Qwen 3.5 / 3.6 thinking toggle; Responses uses `reasoning.effort: 'none'` for `false` |
 | `defaultModelApi` | `'chat' \| 'responses'` | `'chat'`                    | API used by `provider(id)` and `provider.languageModel(id)`              |
 
 ### `createMixlayerWebSocketFetch(options)`

@@ -6,11 +6,11 @@ export const MIXLAYER_KNOWN_MODEL_IDS = [
   'qwen/qwen3.5-4b-free',
   'qwen/qwen3.5-9b',
   'qwen/qwen3.5-35b-a3b',
-  'qwen/qwen3.5-397b-a17b',
   'qwen/qwen3.6-27b',
   'qwen/qwen3.6-35b-a3b',
-  'moonshotai/kimi-k2.7-code',
+  'qwen/qwen3.8-27b',
   'z-ai/glm-5.2',
+  'z-ai/glm-5.3',
 ] as const
 
 export type MixlayerKnownModelId = (typeof MIXLAYER_KNOWN_MODEL_IDS)[number]
@@ -23,9 +23,9 @@ export const MIXLAYER_VISION_MODEL_IDS = [
   'qwen/qwen3.5-4b-free',
   'qwen/qwen3.5-9b',
   'qwen/qwen3.5-35b-a3b',
-  'qwen/qwen3.5-397b-a17b',
   'qwen/qwen3.6-27b',
   'qwen/qwen3.6-35b-a3b',
+  'qwen/qwen3.8-27b',
 ] as const satisfies readonly MixlayerKnownModelId[]
 
 export type MixlayerVisionModelId = (typeof MIXLAYER_VISION_MODEL_IDS)[number]

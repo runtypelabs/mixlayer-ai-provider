@@ -4,7 +4,10 @@ export default defineConfig({
   entry: ['src/index.ts'],
   target: 'node22',
   format: ['esm'],
-  dts: true,
+  dts: {
+    // tsup's declaration bundler injects baseUrl, deprecated in TypeScript 6.
+    compilerOptions: { ignoreDeprecations: '6.0' },
+  },
   splitting: false,
   sourcemap: true,
   clean: true,
