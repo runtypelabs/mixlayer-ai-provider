@@ -36,7 +36,7 @@ export interface MixlayerWebSocketFetchOptions {
   /**
    * HTTP base URL whose Responses endpoint this adapter intercepts. It also
    * derives the WebSocket URL when `url` is omitted. Defaults to
-   * `https://models.mixlayer.ai/v1`.
+   * `https://mixlayer.ai/v1`.
    */
   baseURL?: string
   /** Extra headers to include in the WebSocket handshake. */

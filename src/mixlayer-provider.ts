@@ -1,7 +1,7 @@
 // @runtypelabs/mixlayer-ai-provider — an AI SDK provider for Mixlayer.
 //
 // Mixlayer serves open-weight models over an OpenAI-compatible inference API at
-// https://models.mixlayer.ai/v1. The catalog spans Qwen and GLM models
+// https://mixlayer.ai/v1. The catalog spans Qwen and GLM models
 // and grows over time, so this provider is model-family-agnostic and only
 // layers family-specific behavior on models it recognizes.
 //
