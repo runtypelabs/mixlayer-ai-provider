@@ -7,7 +7,7 @@ import { resolve } from 'node:path'
 const SOURCE_FILE = resolve('src/model-catalog.ts')
 const CATALOG_NAME = 'MIXLAYER_KNOWN_MODEL_IDS'
 const VISION_CATALOG_NAME = 'MIXLAYER_VISION_MODEL_IDS'
-const DEFAULT_BASE_URL = 'https://models.mixlayer.ai/v1'
+const DEFAULT_BASE_URL = 'https://mixlayer.ai/v1'
 
 const apiKey = process.env.MIXLAYER_API_KEY
 const baseURL = stripTrailingSlash(process.env.MIXLAYER_BASE_URL ?? DEFAULT_BASE_URL)

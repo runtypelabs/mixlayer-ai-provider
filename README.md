@@ -219,8 +219,8 @@ API rejects the Chat Completions-only `thinking` field.
 | `extractMixlayerModelId(id)`                                    | Strips a leading `mixlayer/` prefix                              |
 | `isQwen35Or36(modelId)`                                         | Whether an id is a Qwen 3.5 / 3.6 model (the scoped generations) |
 | `applyQwenThinking(body, thinking?)`                            | Sets the `thinking` field on a request body, scoped to Qwen 3.5 / 3.6 |
-| `MIXLAYER_DEFAULT_BASE_URL`                                     | `https://models.mixlayer.ai/v1`                                  |
-| `MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL`                      | `wss://models.mixlayer.ai/v1/responses`                          |
+| `MIXLAYER_DEFAULT_BASE_URL`                                     | `https://mixlayer.ai/v1`                                  |
+| `MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL`                      | `wss://mixlayer.ai/v1/responses`                          |
 | `getMixlayerResponsesWebSocketURL(baseURL?)`                    | Derives a Responses WebSocket URL from an HTTP base URL          |
 
 The provider also exposes:

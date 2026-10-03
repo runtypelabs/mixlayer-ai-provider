@@ -1,5 +1,5 @@
 /** Default Mixlayer OpenAI-compatible inference endpoint. */
-export const MIXLAYER_DEFAULT_BASE_URL = 'https://models.mixlayer.ai/v1'
+export const MIXLAYER_DEFAULT_BASE_URL = 'https://mixlayer.ai/v1'
 
 /** OpenAI Responses WebSocket beta header used by compatible endpoints. */
 export const MIXLAYER_RESPONSES_WEBSOCKET_BETA = 'responses_websockets=2026-02-06'
