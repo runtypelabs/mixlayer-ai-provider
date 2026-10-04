@@ -1,5 +1,23 @@
 # @runtypelabs/mixlayer-ai-provider
 
+## 2.2.1
+
+### Patch Changes
+
+- a4ed7f4: Refresh the model catalog with Qwen 3.8 and GLM 5.3, remove retired models,
+  and include Qwen 3.8 in the vision snapshot. Update the AI SDK dependencies
+  and maintenance toolchain. Require AI SDK 7.0.127 or later in the v7 series
+  for compatible provider types, while preserving Node.js 22 support.
+  
+  Preserve upstream WebSocket error details when Mixlayer omits the sequence
+  number required by the Responses streaming schema.
+  
+  Implement the AI SDK provider-registry contract so typed registry usage works
+  and unsupported embedding or image-generation requests return NoSuchModelError.
+- 8b50913: Use https://mixlayer.ai/v1 as the default inference endpoint and
+  wss://mixlayer.ai/v1/responses for Responses WebSockets. Preserve custom URL overrides.
+- bcba054: Update package author to the current legal entity name, Runtype, Inc.
+
 ## 2.2.0
 
 ### Minor Changes
