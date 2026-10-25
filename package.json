@@ -25,6 +25,7 @@
     "typecheck": "tsrs --noEmit",
     "clean": "rm -rf dist",
     "test": "vitest run",
+    "test:dist": "node scripts/check-dist.mjs",
     "test:live": "pnpm run build && node scripts/live-matrix.mjs",
     "test:watch": "vitest watch",
     "validate:models": "node scripts/validate-model-list.mjs",
