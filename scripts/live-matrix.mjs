@@ -198,7 +198,7 @@ async function runTask(task, index, total) {
       baseURL,
       thinking: task.thinking,
       fetch: websocketFetch ?? fetch,
-      ...(task.testCase.providerSettings?.(task) ?? {}),
+      ...task.testCase.providerSettings?.(task),
     })
     const model =
       task.testCase.viaRegistry === true
@@ -1094,7 +1094,7 @@ async function discoverModels() {
 }
 
 async function runQueue(items, concurrency, runner) {
-  const results = new Array(items.length)
+  const results = Array.from({ length: items.length })
   let nextIndex = 0
 
   async function worker() {
