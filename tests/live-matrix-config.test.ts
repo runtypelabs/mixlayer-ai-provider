@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  LIVE_MODES,
-  createLiveTasks,
-  parseAllowedList,
-} from '../scripts/live-matrix-config.mjs'
+import { LIVE_MODES, createLiveTasks, parseAllowedList } from '../scripts/live-matrix-config.mjs'
 
 const cases = [
   { id: 'default', modes: ['generate', 'stream'] },
@@ -87,10 +83,7 @@ describe('live matrix configuration', () => {
       modelIds: ['qwen/qwen3.6-27b'],
     }
     const tasks = createLiveTasks({
-      models: [
-        'mixlayer/qwen/qwen3.6-27b',
-        'mixlayer:qwen/qwen3.6-27b',
-      ],
+      models: ['mixlayer/qwen/qwen3.6-27b', 'mixlayer:qwen/qwen3.6-27b'],
       thinkingModes: [false],
       transports: ['chat'],
       cases: [visionCase],

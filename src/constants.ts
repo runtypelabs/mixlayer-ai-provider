@@ -5,9 +5,7 @@ export const MIXLAYER_DEFAULT_BASE_URL = 'https://mixlayer.ai/v1'
 export const MIXLAYER_RESPONSES_WEBSOCKET_BETA = 'responses_websockets=2026-02-06'
 
 /** Returns the Responses WebSocket endpoint for a Mixlayer-compatible base URL. */
-export function getMixlayerResponsesWebSocketURL(
-  baseURL = MIXLAYER_DEFAULT_BASE_URL
-): string {
+export function getMixlayerResponsesWebSocketURL(baseURL = MIXLAYER_DEFAULT_BASE_URL): string {
   const url = new URL(baseURL)
   if (url.protocol === 'https:') url.protocol = 'wss:'
   else if (url.protocol === 'http:') url.protocol = 'ws:'

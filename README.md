@@ -125,10 +125,7 @@ To route streaming Responses API requests over Mixlayer's WebSocket endpoint,
 pass `createMixlayerWebSocketFetch()` as the provider fetch:
 
 ```ts
-import {
-  createMixlayer,
-  createMixlayerWebSocketFetch,
-} from '@runtypelabs/mixlayer-ai-provider'
+import { createMixlayer, createMixlayerWebSocketFetch } from '@runtypelabs/mixlayer-ai-provider'
 import { streamText } from 'ai'
 
 const wsFetch = createMixlayerWebSocketFetch()
@@ -189,7 +186,11 @@ const { answers } = await decide({
   state: 'Customer: my order arrived broken and I want a refund NOW.',
   questions: {
     angry: { type: 'boolean', instructions: 'Is the customer angry?' },
-    intent: { type: 'choice', criteria: { refund: null, shipping: null, other: null } },
+    intent: {
+      type: 'choice',
+      instructions: 'What does the customer want?',
+      criteria: { refund: null, shipping: null, other: null },
+    },
     urgency: { type: 'score', instructions: 'Urgency', criteria: ['low', 'medium', 'high'] },
   },
 })
@@ -199,7 +200,9 @@ answers.intent.choice // 'refund'
 ```
 
 Mixlayer supports `boolean`, `choice`, and `score` questions over text and JSON
-state. File (image) state is rejected before any request is sent. Decision
+state. Unlike the AI SDK spec, Mixlayer requires `instructions` on `choice` and
+`score` questions. File (image) state and `choice` / `score` questions without
+instructions are rejected before any request is sent. Decision
 models also resolve through registries with
 `registry.decisionModel('mixlayer:mixlayer/jini-qwen3.8-27b')`. The decision API
 is experimental in the AI SDK and may change in patch releases.
@@ -246,24 +249,24 @@ API rejects the Chat Completions-only `thinking` field.
 
 ## API
 
-| Export                                                          | Description                                                       |
-| --------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `mixlayer`                                                      | Default provider instance (thinking mode, key from env)          |
-| `createMixlayer(settings)`                                      | Provider factory                                                 |
-| `createMixlayerWebSocketFetch(options?)`                        | Fetch adapter for Responses API streaming over WebSocket         |
-| `MIXLAYER_KNOWN_MODEL_IDS`                                     | Readonly snapshot of known model ids                              |
-| `MIXLAYER_VISION_MODEL_IDS`                                    | Readonly snapshot of known image-input model ids                  |
-| `MIXLAYER_DECISION_MODEL_IDS`                                  | Readonly snapshot of known decision model ids                     |
-| `extractMixlayerModelId(id)`                                    | Strips a leading routing `mixlayer/` prefix                      |
-| `supportsMixlayerThinking(modelId)`                             | Whether the provider manages the thinking toggle for a model id  |
-| `isQwen35Or36(modelId)`                                         | Whether an id is a Qwen 3.5 / 3.6 model                          |
-| `isDeepSeekV4(modelId)`                                         | Whether an id is a DeepSeek V4 model                             |
-| `applyMixlayerThinking(body, thinking?)`                        | Sets the `thinking` field on a request body for supported models |
-| `applyQwenThinking(body, thinking?)`                            | Deprecated alias of `applyMixlayerThinking`                      |
-| `applyMixlayerToolDescriptions(body)`                           | Adds an empty `description` to tools that lack one               |
-| `MIXLAYER_DEFAULT_BASE_URL`                                     | `https://mixlayer.ai/v1`                                         |
-| `MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL`                      | `wss://mixlayer.ai/v1/responses`                                 |
-| `getMixlayerResponsesWebSocketURL(baseURL?)`                    | Derives a Responses WebSocket URL from an HTTP base URL          |
+| Export                                       | Description                                                      |
+| -------------------------------------------- | ---------------------------------------------------------------- |
+| `mixlayer`                                   | Default provider instance (thinking mode, key from env)          |
+| `createMixlayer(settings)`                   | Provider factory                                                 |
+| `createMixlayerWebSocketFetch(options?)`     | Fetch adapter for Responses API streaming over WebSocket         |
+| `MIXLAYER_KNOWN_MODEL_IDS`                   | Readonly snapshot of known model ids                             |
+| `MIXLAYER_VISION_MODEL_IDS`                  | Readonly snapshot of known image-input model ids                 |
+| `MIXLAYER_DECISION_MODEL_IDS`                | Readonly snapshot of known decision model ids                    |
+| `extractMixlayerModelId(id)`                 | Strips a leading routing `mixlayer/` prefix                      |
+| `supportsMixlayerThinking(modelId)`          | Whether the provider manages the thinking toggle for a model id  |
+| `isQwen35Or36(modelId)`                      | Whether an id is a Qwen 3.5 / 3.6 model                          |
+| `isDeepSeekV4(modelId)`                      | Whether an id is a DeepSeek V4 model                             |
+| `applyMixlayerThinking(body, thinking?)`     | Sets the `thinking` field on a request body for supported models |
+| `applyQwenThinking(body, thinking?)`         | Deprecated alias of `applyMixlayerThinking`                      |
+| `applyMixlayerToolDescriptions(body)`        | Adds an empty `description` to tools that lack one               |
+| `MIXLAYER_DEFAULT_BASE_URL`                  | `https://mixlayer.ai/v1`                                         |
+| `MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL`   | `wss://mixlayer.ai/v1/responses`                                 |
+| `getMixlayerResponsesWebSocketURL(baseURL?)` | Derives a Responses WebSocket URL from an HTTP base URL          |
 
 The provider also exposes:
 
@@ -274,26 +277,26 @@ The provider also exposes:
 
 ### `MixlayerProviderSettings`
 
-| Option            | Type                   | Default                     | Description                                                              |
-| ----------------- | ---------------------- | --------------------------- | ------------------------------------------------------------------------ |
-| `apiKey`          | `string`               | `MIXLAYER_API_KEY` env      | Mixlayer API key                                                         |
-| `baseURL`         | `string`               | `MIXLAYER_DEFAULT_BASE_URL` | Override the inference endpoint                                          |
-| `headers`         | `Record<string,string>` | —                           | Extra headers sent with every request                                    |
-| `fetch`           | `typeof fetch`         | `globalThis.fetch`          | Custom fetch; pass `createMixlayerWebSocketFetch()` for WS streaming     |
-| `includeUsage`    | `boolean`              | —                           | Include usage information in streaming Chat Completions responses        |
-| `thinking`        | `boolean`              | `true`                      | Qwen 3.5 / 3.6 and DeepSeek V4 thinking toggle; Responses uses `reasoning.effort: 'none'` for `false` |
-| `defaultModelApi` | `'chat' \| 'responses'` | `'chat'`                    | API used by `provider(id)` and `provider.languageModel(id)`              |
+| Option            | Type                    | Default                     | Description                                                                                           |
+| ----------------- | ----------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `apiKey`          | `string`                | `MIXLAYER_API_KEY` env      | Mixlayer API key                                                                                      |
+| `baseURL`         | `string`                | `MIXLAYER_DEFAULT_BASE_URL` | Override the inference endpoint                                                                       |
+| `headers`         | `Record<string,string>` | —                           | Extra headers sent with every request                                                                 |
+| `fetch`           | `typeof fetch`          | `globalThis.fetch`          | Custom fetch; pass `createMixlayerWebSocketFetch()` for WS streaming                                  |
+| `includeUsage`    | `boolean`               | —                           | Include usage information in streaming Chat Completions responses                                     |
+| `thinking`        | `boolean`               | `true`                      | Qwen 3.5 / 3.6 and DeepSeek V4 thinking toggle; Responses uses `reasoning.effort: 'none'` for `false` |
+| `defaultModelApi` | `'chat' \| 'responses'` | `'chat'`                    | API used by `provider(id)` and `provider.languageModel(id)`                                           |
 
 ### `createMixlayerWebSocketFetch(options)`
 
-| Option       | Type                  | Default                                  | Description                                      |
-| ------------ | --------------------- | ---------------------------------------- | ------------------------------------------------ |
-| `url`        | `string`              | Derived from `baseURL`                   | Responses WebSocket destination                  |
-| `baseURL`    | `string`              | `MIXLAYER_DEFAULT_BASE_URL`              | HTTP Responses endpoint to intercept; also derives `url` when omitted |
-| `headers`    | `Record<string,string>` | —                                      | Extra headers for the WebSocket handshake        |
-| `betaHeader` | `string \| false`     | `MIXLAYER_RESPONSES_WEBSOCKET_BETA`      | OpenAI Responses WebSocket beta header value     |
-| `fetch`      | `typeof fetch`        | `globalThis.fetch`                       | Fallback fetch and default fetch-upgrade client  |
-| `connect`    | WebSocket connector   | Workers-compatible fetch upgrade         | Override for runtimes without `Response.webSocket` |
+| Option       | Type                    | Default                             | Description                                                           |
+| ------------ | ----------------------- | ----------------------------------- | --------------------------------------------------------------------- |
+| `url`        | `string`                | Derived from `baseURL`              | Responses WebSocket destination                                       |
+| `baseURL`    | `string`                | `MIXLAYER_DEFAULT_BASE_URL`         | HTTP Responses endpoint to intercept; also derives `url` when omitted |
+| `headers`    | `Record<string,string>` | —                                   | Extra headers for the WebSocket handshake                             |
+| `betaHeader` | `string \| false`       | `MIXLAYER_RESPONSES_WEBSOCKET_BETA` | OpenAI Responses WebSocket beta header value                          |
+| `fetch`      | `typeof fetch`          | `globalThis.fetch`                  | Fallback fetch and default fetch-upgrade client                       |
+| `connect`    | WebSocket connector     | Workers-compatible fetch upgrade    | Override for runtimes without `Response.webSocket`                    |
 
 ## License
 

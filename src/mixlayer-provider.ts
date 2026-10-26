@@ -41,6 +41,7 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { wrapLanguageModel, extractReasoningMiddleware } from 'ai'
 import type { LanguageModelMiddleware } from 'ai'
 import {
+  InvalidArgumentError,
   NoSuchModelError,
   UnsupportedFunctionalityError,
   type Experimental_DecisionModelV4,
@@ -308,7 +309,8 @@ export interface MixlayerProvider extends ProviderV4 {
   /**
    * Creates an experimental decision model backed by Mixlayer's `/v1/decisions`
    * endpoint, for `experimental_decide`. Supports `boolean`, `choice`, and
-   * `score` questions over text and JSON state; file (image) state is rejected.
+   * `score` questions over text and JSON state; `choice` and `score` questions
+   * require instructions, and file (image) state is rejected.
    */
   decisionModel(modelId: MixlayerDecisionModelId): Experimental_DecisionModelV4
   /** Embeddings are not exposed by this provider. Always throws NoSuchModelError. */
@@ -380,9 +382,7 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
     return wrapResponsesModel(openaiResponses.responses(resolved))
   }
 
-  const createDecisionModel = (
-    modelId: MixlayerDecisionModelId
-  ): Experimental_DecisionModelV4 => {
+  const createDecisionModel = (modelId: MixlayerDecisionModelId): Experimental_DecisionModelV4 => {
     // Mixlayer's `/v1/decisions` speaks the OpenAI Decisions wire format, but
     // accepts text input only — reject file state before any I/O.
     const model = openaiResponses.decisionModel(extractMixlayerModelId(modelId))
@@ -396,6 +396,20 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
           if (part.type === 'file') {
             throw new UnsupportedFunctionalityError({
               functionality: `Mixlayer decision file input: ${part.mediaType}`,
+            })
+          }
+        }
+        // The AI SDK lets `choice` and `score` questions omit instructions when
+        // criteria define the judgment, but Mixlayer rejects them with a
+        // misleading "only text input is supported" error.
+        for (const [name, question] of Object.entries(options.questions)) {
+          if (
+            (question.type === 'choice' || question.type === 'score') &&
+            (question.instructions == null || question.instructions === '')
+          ) {
+            throw new InvalidArgumentError({
+              argument: `questions.${name}.instructions`,
+              message: `Mixlayer decision ${question.type} questions require instructions (question "${name}").`,
             })
           }
         }
