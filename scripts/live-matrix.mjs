@@ -13,11 +13,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
-import {
-  LIVE_MODES,
-  createLiveTasks,
-  parseAllowedList,
-} from './live-matrix-config.mjs'
+import { LIVE_MODES, createLiveTasks, parseAllowedList } from './live-matrix-config.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const projectRoot = resolve(__dirname, '..')
@@ -57,18 +53,9 @@ if (!apiKey) {
 const baseURL = stripTrailingSlash(
   args.baseUrl ?? process.env.MIXLAYER_BASE_URL ?? MIXLAYER_DEFAULT_BASE_URL
 )
-const concurrency = parsePositiveInt(
-  args.concurrency ?? process.env.MIXLAYER_LIVE_CONCURRENCY,
-  1
-)
-const timeoutMs = parsePositiveInt(
-  args.timeoutMs ?? process.env.MIXLAYER_LIVE_TIMEOUT_MS,
-  120_000
-)
-const maxRetries = parseNonNegativeInt(
-  args.maxRetries ?? process.env.MIXLAYER_LIVE_MAX_RETRIES,
-  0
-)
+const concurrency = parsePositiveInt(args.concurrency ?? process.env.MIXLAYER_LIVE_CONCURRENCY, 1)
+const timeoutMs = parsePositiveInt(args.timeoutMs ?? process.env.MIXLAYER_LIVE_TIMEOUT_MS, 120_000)
+const maxRetries = parseNonNegativeInt(args.maxRetries ?? process.env.MIXLAYER_LIVE_MAX_RETRIES, 0)
 const outputPath = resolve(
   projectRoot,
   args.output ?? `live-test-results/mixlayer-live-${timestamp()}.json`
@@ -308,14 +295,9 @@ function createNodeWebSocketConnector(calls) {
       const resolveOpen = settle(() => resolve(socket))
       const rejectOpen = settle(reject)
       const onOpen = () => resolveOpen()
-      const onError = event =>
-        rejectOpen(event?.error ?? new Error('WebSocket connection failed'))
+      const onError = event => rejectOpen(event?.error ?? new Error('WebSocket connection failed'))
       const onClose = event =>
-        rejectOpen(
-          new Error(
-            `WebSocket closed before opening (code ${event?.code ?? 'unknown'})`
-          )
-        )
+        rejectOpen(new Error(`WebSocket closed before opening (code ${event?.code ?? 'unknown'})`))
       const onAbort = () => {
         try {
           socket.close()
@@ -346,14 +328,18 @@ async function runGenerate(callOptions, testCase) {
     totalUsage: result.totalUsage,
     warnings: result.warnings,
     output: testCase.captureStructuredOutput ? result.output : undefined,
-    toolCalls: result.steps.flatMap(step => step.toolCalls ?? []).map(toolCall => ({
-      toolName: toolCall.toolName,
-      input: toolCall.input,
-    })),
-    toolResults: result.steps.flatMap(step => step.toolResults ?? []).map(toolResult => ({
-      toolName: toolResult.toolName,
-      output: toolResult.output,
-    })),
+    toolCalls: result.steps
+      .flatMap(step => step.toolCalls ?? [])
+      .map(toolCall => ({
+        toolName: toolCall.toolName,
+        input: toolCall.input,
+      })),
+    toolResults: result.steps
+      .flatMap(step => step.toolResults ?? [])
+      .map(toolResult => ({
+        toolName: toolResult.toolName,
+        output: toolResult.output,
+      })),
   })
 }
 
@@ -601,8 +587,7 @@ function buildCases({ includeStructured, includeTools, includeVision, visionFixt
       thinkingModes: [false],
       captureStructuredOutput: true,
       options: () => ({
-        prompt:
-          'Return only a JSON object with exactly these fields: {"ok":true,"label":"OK"}',
+        prompt: 'Return only a JSON object with exactly these fields: {"ok":true,"label":"OK"}',
         maxOutputTokens: 96,
         output: Output.object({
           schema: jsonSchema({
@@ -634,8 +619,7 @@ function buildCases({ includeStructured, includeTools, includeVision, visionFixt
       thinkingModes: [false],
       captureStructuredOutput: true,
       options: () => ({
-        prompt:
-          'Return only a JSON object with exactly these fields: {"ok":true,"label":"OK"}',
+        prompt: 'Return only a JSON object with exactly these fields: {"ok":true,"label":"OK"}',
         maxOutputTokens: 96,
         output: Output.object({
           schema: jsonSchema({
@@ -729,8 +713,7 @@ function buildCases({ includeStructured, includeTools, includeVision, visionFixt
         passIf(
           output.toolResults?.some(
             toolResult =>
-              toolResult.toolName === 'report_marker' &&
-              toolResult.output?.echoed === 'OK'
+              toolResult.toolName === 'report_marker' && toolResult.output?.echoed === 'OK'
           ),
           'tool execution result was returned',
           `expected report_marker tool result, got ${JSON.stringify(output.toolResults)}`
@@ -742,8 +725,7 @@ function buildCases({ includeStructured, includeTools, includeVision, visionFixt
   if (includeVision) {
     cases.push({
       id: 'vision',
-      description:
-        'Inline PNG image understanding through standard AI SDK file parts.',
+      description: 'Inline PNG image understanding through standard AI SDK file parts.',
       modes: ['generate', 'stream'],
       transports: ['chat', 'responses-http', 'responses-websocket'],
       thinkingModes: [false],
@@ -773,9 +755,7 @@ function buildCases({ includeStructured, includeTools, includeVision, visionFixt
         passIf(
           /red.*green.*blue.*yellow/i.test(String(output.textSample ?? '')),
           'model identified the four image colors in order',
-          `model did not identify the image colors in order: ${JSON.stringify(
-            output.textSample
-          )}`
+          `model did not identify the image colors in order: ${JSON.stringify(output.textSample)}`
         ),
       ],
     })
@@ -813,11 +793,7 @@ function assertRequest({ task, calls, output }) {
     )
     if (task.mode === 'stream') {
       assertions.push(
-        passIf(
-          body.stream === true,
-          'stream=true was sent',
-          'stream request omitted stream=true'
-        )
+        passIf(body.stream === true, 'stream=true was sent', 'stream request omitted stream=true')
       )
     }
     assertions.push(...assertVisionRequest(body, task))
@@ -894,9 +870,7 @@ function assertRequest({ task, calls, output }) {
     passIf(
       body.chat_template_kwargs === undefined,
       'unsupported chat_template_kwargs was not sent',
-      `unsupported chat_template_kwargs was sent: ${JSON.stringify(
-        body.chat_template_kwargs
-      )}`
+      `unsupported chat_template_kwargs was sent: ${JSON.stringify(body.chat_template_kwargs)}`
     )
   )
 
@@ -951,9 +925,7 @@ function assertRequest({ task, calls, output }) {
       passIf(
         deepEqual(body[key], expected),
         `request body ${key} matched ${JSON.stringify(expected)}`,
-        `request body ${key} expected ${JSON.stringify(expected)}, got ${JSON.stringify(
-          body[key]
-        )}`
+        `request body ${key} expected ${JSON.stringify(expected)}, got ${JSON.stringify(body[key])}`
       )
     )
   }
@@ -993,14 +965,11 @@ function assertVisionRequest(body, task) {
       (value.type === 'image_url' || value.type === 'input_image')
   )
   const imageUrl =
-    typeof imagePart?.image_url === 'string'
-      ? imagePart.image_url
-      : imagePart?.image_url?.url
+    typeof imagePart?.image_url === 'string' ? imagePart.image_url : imagePart?.image_url?.url
 
   return [
     passIf(
-      typeof imageUrl === 'string' &&
-        imageUrl.startsWith('data:image/png;base64,'),
+      typeof imageUrl === 'string' && imageUrl.startsWith('data:image/png;base64,'),
       'serialized the AI SDK image as an inline PNG data URL',
       `missing inline PNG image part: ${JSON.stringify(imagePart)}`
     ),
@@ -1107,9 +1076,7 @@ async function runQueue(items, concurrency, runner) {
     }
   }
 
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, () => worker())
-  )
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()))
 
   return results.filter(Boolean)
 }
@@ -1241,9 +1208,7 @@ function sample(value, max = 160) {
 }
 
 function compact(object) {
-  return Object.fromEntries(
-    Object.entries(object).filter(([, value]) => value !== undefined)
-  )
+  return Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined))
 }
 
 function deepEqual(left, right) {

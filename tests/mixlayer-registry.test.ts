@@ -24,12 +24,11 @@ describe('AI SDK provider registry', () => {
         mixlayer: createMixlayer({ apiKey: 'test' }),
       })
 
-      const getModel = modelType === 'embeddingModel'
-        ? () => registry.embeddingModel('mixlayer:unsupported-model')
-        : () => registry.imageModel('mixlayer:unsupported-model')
-      expect(getModel).toThrow(
-        new NoSuchModelError({ modelId: 'unsupported-model', modelType })
-      )
+      const getModel =
+        modelType === 'embeddingModel'
+          ? () => registry.embeddingModel('mixlayer:unsupported-model')
+          : () => registry.imageModel('mixlayer:unsupported-model')
+      expect(getModel).toThrow(new NoSuchModelError({ modelId: 'unsupported-model', modelType }))
     }
   )
 })

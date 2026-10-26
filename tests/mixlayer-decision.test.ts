@@ -90,7 +90,13 @@ describe('decisionModel', () => {
 
     await expect(
       model.doDecide({
-        state: [{ type: 'file', mediaType: 'image/png', data: { type: 'data', data: new Uint8Array([1]) } }],
+        state: [
+          {
+            type: 'file',
+            mediaType: 'image/png',
+            data: { type: 'data', data: new Uint8Array([1]) },
+          },
+        ],
         questions: { q: { type: 'boolean', instructions: 'Is it red?' } },
       })
     ).rejects.toBeInstanceOf(UnsupportedFunctionalityError)
@@ -100,17 +106,20 @@ describe('decisionModel', () => {
   it.each([
     ['choice', { type: 'choice', criteria: { refund: null, other: null } }],
     ['score', { type: 'score', instructions: '', criteria: ['low', 'high'] }],
-  ] as const)('rejects %s questions without instructions before sending a request', async (_type, question) => {
-    const { provider, requests } = createRecordingProvider()
+  ] as const)(
+    'rejects %s questions without instructions before sending a request',
+    async (_type, question) => {
+      const { provider, requests } = createRecordingProvider()
 
-    await expect(
-      provider.decisionModel(JINI).doDecide({
-        state: [{ type: 'text', text: 'I want a refund' }],
-        questions: { q: question },
-      })
-    ).rejects.toBeInstanceOf(InvalidArgumentError)
-    expect(requests).toHaveLength(0)
-  })
+      await expect(
+        provider.decisionModel(JINI).doDecide({
+          state: [{ type: 'text', text: 'I want a refund' }],
+          questions: { q: question },
+        })
+      ).rejects.toBeInstanceOf(InvalidArgumentError)
+      expect(requests).toHaveLength(0)
+    }
+  )
 
   it('does not advertise box questions', () => {
     const { provider } = createRecordingProvider()

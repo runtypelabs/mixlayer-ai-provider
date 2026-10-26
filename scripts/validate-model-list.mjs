@@ -121,9 +121,7 @@ async function readRuntimeCatalog(catalogName) {
 
   const duplicates = modelIds.filter((model, index) => modelIds.indexOf(model) !== index)
   if (duplicates.length > 0) {
-    fail(
-      `${catalogName} contains duplicate model id(s): ${[...new Set(duplicates)].join(', ')}`
-    )
+    fail(`${catalogName} contains duplicate model id(s): ${[...new Set(duplicates)].join(', ')}`)
   }
 
   return modelIds.sort()
@@ -166,15 +164,14 @@ async function fetchLiveModels() {
 
 function annotate(level, message) {
   if (process.env.GITHUB_ACTIONS === 'true') {
-    console.error(`::${level} file=src/model-catalog.ts,title=Mixlayer runtime catalog drift::${escapeAnnotation(message)}`)
+    console.error(
+      `::${level} file=src/model-catalog.ts,title=Mixlayer runtime catalog drift::${escapeAnnotation(message)}`
+    )
   }
 }
 
 function escapeAnnotation(value) {
-  return String(value)
-    .replaceAll('%', '%25')
-    .replaceAll('\r', '%0D')
-    .replaceAll('\n', '%0A')
+  return String(value).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')
 }
 
 function stripTrailingSlash(value) {

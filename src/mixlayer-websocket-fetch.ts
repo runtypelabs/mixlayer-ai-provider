@@ -119,7 +119,9 @@ export function createMixlayerWebSocketFetch(
     if (current && !isClosed(current)) current.close()
   }
 
-  async function getConnection(headers: Record<string, string>): Promise<MixlayerWebSocketConnection> {
+  async function getConnection(
+    headers: Record<string, string>
+  ): Promise<MixlayerWebSocketConnection> {
     const headerKey = stableHeaderKey(headers)
 
     if (socket && !isClosed(socket) && socketHeaderKey === headerKey) {
@@ -291,10 +293,7 @@ export function createMixlayerWebSocketFetch(
             messageIndex++
             controller.enqueue(encoder.encode(`data: ${data}\n\n`))
 
-            if (
-              typeof parsed.type === 'string' &&
-              TERMINAL_RESPONSE_EVENT_TYPES.has(parsed.type)
-            ) {
+            if (typeof parsed.type === 'string' && TERMINAL_RESPONSE_EVENT_TYPES.has(parsed.type)) {
               controller.enqueue(encoder.encode('data: [DONE]\n\n'))
               cleanupSuccessfully()
               closeStream()
@@ -339,9 +338,7 @@ export function createMixlayerWebSocketFetch(
         }
 
         Promise.resolve()
-          .then(() =>
-            connection.send(JSON.stringify({ type: 'response.create', ...requestBody }))
-          )
+          .then(() => connection.send(JSON.stringify({ type: 'response.create', ...requestBody })))
           .catch(error => {
             cleanupIndeterminate()
             controller.error(error)
@@ -401,7 +398,10 @@ function getRequestURL(input: RequestInfo | URL): string {
   return input.url
 }
 
-function getRequestMethod(input: RequestInfo | URL, init: RequestInit | undefined): string | undefined {
+function getRequestMethod(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined
+): string | undefined {
   return (init?.method ?? (input instanceof Request ? input.method : undefined))?.toUpperCase()
 }
 

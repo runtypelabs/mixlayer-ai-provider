@@ -382,9 +382,7 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
     return wrapResponsesModel(openaiResponses.responses(resolved))
   }
 
-  const createDecisionModel = (
-    modelId: MixlayerDecisionModelId
-  ): Experimental_DecisionModelV4 => {
+  const createDecisionModel = (modelId: MixlayerDecisionModelId): Experimental_DecisionModelV4 => {
     // Mixlayer's `/v1/decisions` speaks the OpenAI Decisions wire format, but
     // accepts text input only — reject file state before any I/O.
     const model = openaiResponses.decisionModel(extractMixlayerModelId(modelId))

@@ -83,9 +83,7 @@ describe('MIXLAYER_KNOWN_MODEL_IDS', () => {
       'z-ai/glm-5.2',
       'z-ai/glm-5.3',
     ])
-    expect(new Set(MIXLAYER_KNOWN_MODEL_IDS).size).toBe(
-      MIXLAYER_KNOWN_MODEL_IDS.length
-    )
+    expect(new Set(MIXLAYER_KNOWN_MODEL_IDS).size).toBe(MIXLAYER_KNOWN_MODEL_IDS.length)
   })
 
   it('exports vision-capable ids as a known-model subset', () => {
@@ -98,9 +96,7 @@ describe('MIXLAYER_KNOWN_MODEL_IDS', () => {
       'qwen/qwen3.8-27b',
     ])
     expect(
-      MIXLAYER_VISION_MODEL_IDS.every(modelId =>
-        MIXLAYER_KNOWN_MODEL_IDS.includes(modelId)
-      )
+      MIXLAYER_VISION_MODEL_IDS.every(modelId => MIXLAYER_KNOWN_MODEL_IDS.includes(modelId))
     ).toBe(true)
   })
 })
@@ -160,9 +156,7 @@ describe('extractMixlayerModelId', () => {
   })
 
   it('keeps first-party mixlayer/ ids that have no other org segment', () => {
-    expect(extractMixlayerModelId('mixlayer/jini-qwen3.8-27b')).toBe(
-      'mixlayer/jini-qwen3.8-27b'
-    )
+    expect(extractMixlayerModelId('mixlayer/jini-qwen3.8-27b')).toBe('mixlayer/jini-qwen3.8-27b')
     expect(extractMixlayerModelId('mixlayer:mixlayer/jini-qwen3.8-27b')).toBe(
       'mixlayer/jini-qwen3.8-27b'
     )
@@ -270,7 +264,14 @@ describe('applyQwenThinking', () => {
 
   it('does NOT inject sampling defaults (Mixlayer applies them server-side)', () => {
     const out = applyQwenThinking({ model: 'qwen/qwen3.5-9b', messages: [] })
-    for (const key of ['temperature', 'top_p', 'top_k', 'presence_penalty', 'repetition_penalty', 'min_p']) {
+    for (const key of [
+      'temperature',
+      'top_p',
+      'top_k',
+      'presence_penalty',
+      'repetition_penalty',
+      'min_p',
+    ]) {
       expect(out).not.toHaveProperty(key)
     }
   })
@@ -302,11 +303,12 @@ describe('createMixlayer', () => {
     const urls: string[] = []
     const provider = createMixlayer({
       apiKey: 'test',
-      fetch: async (input) => {
+      fetch: async input => {
         urls.push(String(input))
-        return new Response(JSON.stringify(
-          api === 'chat' ? createChatSuccessBody() : createResponsesSuccessBody()
-        ), { headers: { 'content-type': 'application/json' } })
+        return new Response(
+          JSON.stringify(api === 'chat' ? createChatSuccessBody() : createResponsesSuccessBody()),
+          { headers: { 'content-type': 'application/json' } }
+        )
       },
     })
 
@@ -723,9 +725,7 @@ describe('createMixlayer', () => {
 
 describe('getMixlayerResponsesWebSocketURL', () => {
   it('derives the default Responses WebSocket URL from the base URL', () => {
-    expect(MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL).toBe(
-      'wss://mixlayer.ai/v1/responses'
-    )
+    expect(MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL).toBe('wss://mixlayer.ai/v1/responses')
     expect(getMixlayerResponsesWebSocketURL()).toBe(MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL)
   })
 
@@ -773,9 +773,7 @@ describe('createMixlayerWebSocketFetch', () => {
       expect(socket.url).toBe('wss://127.0.0.1:8787/v1/responses')
       expect(socket.headers.Authorization).toBe('Bearer test-key')
       expect(socket.headers['OpenAI-Beta']).toBe(MIXLAYER_RESPONSES_WEBSOCKET_BETA)
-      expect(socket.headers['User-Agent']).toBe(
-        'ai-sdk/openai/4.0.0 ai-sdk/provider-utils/5.0.0'
-      )
+      expect(socket.headers['User-Agent']).toBe('ai-sdk/openai/4.0.0 ai-sdk/provider-utils/5.0.0')
       expect(JSON.parse(socket.sent[0]) as unknown).toEqual({
         type: 'response.create',
         model: 'qwen/qwen3.5-9b',
@@ -941,12 +939,16 @@ describe('createMixlayerWebSocketFetch', () => {
     try {
       const firstResponse = await wsFetch('https://mixlayer.ai/v1/responses', requestInit)
       await vi.waitFor(() => expect(connection.sent).toHaveLength(1))
-      connection.emitMessage(JSON.stringify({ type: 'response.completed', response: { id: 'first' } }))
+      connection.emitMessage(
+        JSON.stringify({ type: 'response.completed', response: { id: 'first' } })
+      )
       expect(await firstResponse.text()).toContain('data: [DONE]')
 
       const secondResponse = await wsFetch('https://mixlayer.ai/v1/responses', requestInit)
       await vi.waitFor(() => expect(connection.sent).toHaveLength(2))
-      connection.emitMessage(JSON.stringify({ type: 'response.completed', response: { id: 'second' } }))
+      connection.emitMessage(
+        JSON.stringify({ type: 'response.completed', response: { id: 'second' } })
+      )
       expect(await secondResponse.text()).toContain('data: [DONE]')
       expect(connect).toHaveBeenCalledTimes(1)
       expect(connection.sent.map(message => JSON.parse(message))).toEqual([
@@ -974,20 +976,14 @@ describe('createMixlayerWebSocketFetch', () => {
     }
 
     try {
-      const firstResponse = await wsFetch(
-        'https://mixlayer.ai/v1/responses',
-        requestInit
-      )
+      const firstResponse = await wsFetch('https://mixlayer.ai/v1/responses', requestInit)
       await vi.waitFor(() => expect(connections[0]?.sent).toHaveLength(1))
       connections[0].emitMessage(JSON.stringify({ type: 'response.completed' }))
       await firstResponse.text()
 
       connections[0].dispatchEvent(new Event('close'))
 
-      const secondResponse = await wsFetch(
-        'https://mixlayer.ai/v1/responses',
-        requestInit
-      )
+      const secondResponse = await wsFetch('https://mixlayer.ai/v1/responses', requestInit)
       await vi.waitFor(() => expect(connections).toHaveLength(2))
       connections[1].emitMessage(JSON.stringify({ type: 'response.completed' }))
       expect(await secondResponse.text()).toContain('data: [DONE]')
@@ -1280,7 +1276,9 @@ describe('createMixlayerWebSocketFetch', () => {
       await vi.waitFor(() => expect(socket?.sent).toHaveLength(1))
       expect(socket?.headers['User-Agent']).toBe('custom-mixlayer-ws-client')
 
-      socket?.emitMessage(JSON.stringify({ type: 'response.completed', response: { id: 'resp_1' } }))
+      socket?.emitMessage(
+        JSON.stringify({ type: 'response.completed', response: { id: 'resp_1' } })
+      )
       expect(await response.text()).toContain('data: [DONE]')
     } finally {
       wsFetch.close()
@@ -1321,7 +1319,9 @@ describe('createMixlayerWebSocketFetch', () => {
       expect(connection.accepted).toBe(true)
       expect(connection.binaryType).toBe('arraybuffer')
 
-      connection.emitMessage(JSON.stringify({ type: 'response.completed', response: { id: 'resp_1' } }))
+      connection.emitMessage(
+        JSON.stringify({ type: 'response.completed', response: { id: 'resp_1' } })
+      )
       expect(await response.text()).toContain('data: [DONE]')
     } finally {
       wsFetch.close()
@@ -1387,12 +1387,14 @@ describe('createMixlayerWebSocketFetch', () => {
       body: JSON.stringify({ model: 'qwen/qwen3.5-9b', input: [], stream: true }),
     }
 
-    await expect(
-      wsFetch('https://mixlayer.ai/v1/responses', requestInit)
-    ).rejects.toThrow('connect failed')
+    await expect(wsFetch('https://mixlayer.ai/v1/responses', requestInit)).rejects.toThrow(
+      'connect failed'
+    )
 
     const response = await wsFetch('https://mixlayer.ai/v1/responses', requestInit)
-    connection.emitMessage(JSON.stringify({ type: 'response.completed', response: { id: 'resp_1' } }))
+    connection.emitMessage(
+      JSON.stringify({ type: 'response.completed', response: { id: 'resp_1' } })
+    )
 
     expect(calls).toBe(2)
     expect(await response.text()).toContain('data: [DONE]')
