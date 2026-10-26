@@ -1,5 +1,5 @@
 import { createProviderRegistry, experimental_decide } from 'ai'
-import { UnsupportedFunctionalityError } from '@ai-sdk/provider'
+import { InvalidArgumentError, UnsupportedFunctionalityError } from '@ai-sdk/provider'
 import { describe, expect, it } from 'vitest'
 import { createMixlayer, MIXLAYER_DECISION_MODEL_IDS } from '../src/index'
 
@@ -56,7 +56,11 @@ describe('decisionModel', () => {
       state: 'Customer: my order arrived broken and I want a refund NOW.',
       questions: {
         angry: { type: 'boolean', instructions: 'Is the customer angry?' },
-        intent: { type: 'choice', criteria: { refund: null, other: null } },
+        intent: {
+          type: 'choice',
+          instructions: 'What does the customer want?',
+          criteria: { refund: null, other: null },
+        },
       },
     })
 
@@ -90,6 +94,21 @@ describe('decisionModel', () => {
         questions: { q: { type: 'boolean', instructions: 'Is it red?' } },
       })
     ).rejects.toBeInstanceOf(UnsupportedFunctionalityError)
+    expect(requests).toHaveLength(0)
+  })
+
+  it.each([
+    ['choice', { type: 'choice', criteria: { refund: null, other: null } }],
+    ['score', { type: 'score', instructions: '', criteria: ['low', 'high'] }],
+  ] as const)('rejects %s questions without instructions before sending a request', async (_type, question) => {
+    const { provider, requests } = createRecordingProvider()
+
+    await expect(
+      provider.decisionModel(JINI).doDecide({
+        state: [{ type: 'text', text: 'I want a refund' }],
+        questions: { q: question },
+      })
+    ).rejects.toBeInstanceOf(InvalidArgumentError)
     expect(requests).toHaveLength(0)
   })
 

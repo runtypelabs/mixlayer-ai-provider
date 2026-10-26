@@ -189,7 +189,11 @@ const { answers } = await decide({
   state: 'Customer: my order arrived broken and I want a refund NOW.',
   questions: {
     angry: { type: 'boolean', instructions: 'Is the customer angry?' },
-    intent: { type: 'choice', criteria: { refund: null, shipping: null, other: null } },
+    intent: {
+      type: 'choice',
+      instructions: 'What does the customer want?',
+      criteria: { refund: null, shipping: null, other: null },
+    },
     urgency: { type: 'score', instructions: 'Urgency', criteria: ['low', 'medium', 'high'] },
   },
 })
@@ -199,7 +203,9 @@ answers.intent.choice // 'refund'
 ```
 
 Mixlayer supports `boolean`, `choice`, and `score` questions over text and JSON
-state. File (image) state is rejected before any request is sent. Decision
+state. Unlike the AI SDK spec, Mixlayer requires `instructions` on `choice` and
+`score` questions. File (image) state and `choice` / `score` questions without
+instructions are rejected before any request is sent. Decision
 models also resolve through registries with
 `registry.decisionModel('mixlayer:mixlayer/jini-qwen3.8-27b')`. The decision API
 is experimental in the AI SDK and may change in patch releases.
