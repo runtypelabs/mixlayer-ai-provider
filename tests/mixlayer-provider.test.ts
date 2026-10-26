@@ -1,4 +1,4 @@
-import { generateText } from 'ai'
+import { generateText, jsonSchema, tool } from 'ai'
 import { describe, it, expect, vi } from 'vitest'
 
 import {
@@ -8,7 +8,11 @@ import {
   extractMixlayerModelId,
   getMixlayerResponsesWebSocketURL,
   isQwen35Or36,
+  isDeepSeekV4,
+  supportsMixlayerThinking,
+  applyMixlayerThinking,
   applyQwenThinking,
+  applyMixlayerToolDescriptions,
   MIXLAYER_DEFAULT_BASE_URL,
   MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL,
   MIXLAYER_RESPONSES_WEBSOCKET_BETA,
@@ -69,6 +73,7 @@ class MockWebSocketConnection extends EventTarget implements MixlayerWebSocketCo
 describe('MIXLAYER_KNOWN_MODEL_IDS', () => {
   it('exports the current model snapshot without duplicates', () => {
     expect(MIXLAYER_KNOWN_MODEL_IDS).toEqual([
+      'deepseek/deepseek-v4.1-flash',
       'qwen/qwen3.5-4b-free',
       'qwen/qwen3.5-9b',
       'qwen/qwen3.5-35b-a3b',
@@ -153,6 +158,15 @@ describe('extractMixlayerModelId', () => {
   it('returns bare ids unchanged', () => {
     expect(extractMixlayerModelId('qwen/qwen3.5-9b')).toBe('qwen/qwen3.5-9b')
   })
+
+  it('keeps first-party mixlayer/ ids that have no other org segment', () => {
+    expect(extractMixlayerModelId('mixlayer/jini-qwen3.8-27b')).toBe(
+      'mixlayer/jini-qwen3.8-27b'
+    )
+    expect(extractMixlayerModelId('mixlayer:mixlayer/jini-qwen3.8-27b')).toBe(
+      'mixlayer/jini-qwen3.8-27b'
+    )
+  })
 })
 
 describe('isQwen35Or36', () => {
@@ -192,6 +206,54 @@ describe('isQwen35Or36', () => {
   it('requires a separator after the minor version (no false positives on size tokens)', () => {
     expect(isQwen35Or36('qwen3-5b')).toBe(false)
     expect(isQwen35Or36('qwen3-50b')).toBe(false)
+  })
+})
+
+describe('supportsMixlayerThinking', () => {
+  it('covers Qwen 3.5 / 3.6 and DeepSeek V4', () => {
+    expect(isDeepSeekV4('deepseek/deepseek-v4.1-flash')).toBe(true)
+    expect(supportsMixlayerThinking('deepseek/deepseek-v4.1-flash')).toBe(true)
+    expect(supportsMixlayerThinking('qwen/qwen3.6-27b')).toBe(true)
+  })
+
+  it('excludes other DeepSeek generations and families', () => {
+    expect(isDeepSeekV4('deepseek/deepseek-v40')).toBe(false)
+    expect(isDeepSeekV4('deepseek/deepseek-v3.2')).toBe(false)
+    expect(supportsMixlayerThinking('z-ai/glm-5.3')).toBe(false)
+    expect(supportsMixlayerThinking('qwen/qwen3.8-27b')).toBe(false)
+  })
+})
+
+describe('applyMixlayerThinking', () => {
+  it('sets the thinking toggle for DeepSeek V4', () => {
+    const out = applyMixlayerThinking({ model: 'deepseek/deepseek-v4.1-flash' }, false)
+    expect(out.thinking).toBe(false)
+  })
+
+  it('keeps applyQwenThinking as a deprecated alias', () => {
+    expect(applyQwenThinking).toBe(applyMixlayerThinking)
+  })
+})
+
+describe('applyMixlayerToolDescriptions', () => {
+  it('adds an empty description to function tools that lack one', () => {
+    const out = applyMixlayerToolDescriptions({
+      tools: [
+        { type: 'function', function: { name: 'a', parameters: {} } },
+        { type: 'function', function: { name: 'b', description: 'B', parameters: {} } },
+      ],
+    })
+    expect(out.tools).toEqual([
+      { type: 'function', function: { name: 'a', description: '', parameters: {} } },
+      { type: 'function', function: { name: 'b', description: 'B', parameters: {} } },
+    ])
+  })
+
+  it('returns the body unchanged when nothing needs a description', () => {
+    const body = { tools: [{ type: 'function', function: { name: 'b', description: 'B' } }] }
+    expect(applyMixlayerToolDescriptions(body)).toBe(body)
+    const noTools = { model: 'qwen/qwen3.5-9b' }
+    expect(applyMixlayerToolDescriptions(noTools)).toBe(noTools)
   })
 })
 
@@ -313,6 +375,79 @@ describe('createMixlayer', () => {
 
     expect(result.text).toBe('ok')
     expect(authorizations).toEqual(['Bearer real-mixlayer-token'])
+  })
+
+  it('sends a description for Chat Completions tools defined without one', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const provider = createMixlayer({
+      apiKey: 'test',
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify(createChatSuccessBody()), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    await generateText({
+      model: provider.chat('qwen/qwen3.8-27b'),
+      prompt: 'Weather in Paris?',
+      tools: {
+        weather: tool({
+          inputSchema: jsonSchema<{ city: string }>({
+            type: 'object',
+            properties: { city: { type: 'string' } },
+          }),
+        }),
+      },
+    })
+
+    expect(bodies[0]?.tools).toMatchObject([
+      { type: 'function', function: { name: 'weather', description: '' } },
+    ])
+  })
+
+  it('sends thinking: false for DeepSeek V4 on Chat Completions', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const provider = createMixlayer({
+      apiKey: 'test',
+      thinking: false,
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify(createChatSuccessBody()), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    await generateText({
+      model: provider.chat('deepseek/deepseek-v4.1-flash'),
+      prompt: 'Say ok',
+    })
+
+    expect(bodies[0]).toMatchObject({ model: 'deepseek/deepseek-v4.1-flash', thinking: false })
+  })
+
+  it('sends reasoning effort none for DeepSeek V4 on Responses when thinking is false', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const provider = createMixlayer({
+      apiKey: 'test',
+      thinking: false,
+      fetch: async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return new Response(JSON.stringify(createResponsesSuccessBody()), {
+          headers: { 'content-type': 'application/json' },
+        })
+      },
+    })
+
+    await generateText({
+      model: provider.responses('deepseek/deepseek-v4.1-flash'),
+      prompt: 'Say ok',
+    })
+
+    expect(bodies[0]).toMatchObject({ reasoning: { effort: 'none' } })
+    expect(bodies[0]).not.toHaveProperty('thinking')
   })
 
   it('serializes AI SDK image file parts for Chat Completions', async () => {

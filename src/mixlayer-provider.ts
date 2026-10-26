@@ -1,23 +1,27 @@
 // @runtypelabs/mixlayer-ai-provider — an AI SDK provider for Mixlayer.
 //
 // Mixlayer serves open-weight models over an OpenAI-compatible inference API at
-// https://mixlayer.ai/v1. The catalog spans Qwen and GLM models
-// and grows over time, so this provider is model-family-agnostic and only
-// layers family-specific behavior on models it recognizes.
+// https://mixlayer.ai/v1. The catalog spans Qwen, GLM, and DeepSeek models plus
+// decision models, and grows over time, so this provider is model-family-agnostic
+// and only layers family-specific behavior on models it recognizes.
 //
 // It wraps `@ai-sdk/openai-compatible` for Chat Completions and
 // `@ai-sdk/openai` for Responses API models with everything that makes
 // Mixlayer behave correctly out of the box:
 //
 //   - the Mixlayer base URL default
-//   - the Qwen `thinking` toggle (Mixlayer applies the recommended sampling
-//     defaults server-side, so the provider no longer injects them)
+//   - the `thinking` toggle for Qwen 3.5 / 3.6 and DeepSeek V4 (Mixlayer applies
+//     the recommended sampling defaults server-side, so the provider no longer
+//     injects them)
+//   - a `description` on every Chat Completions tool, which Mixlayer requires
 //   - reasoning middleware that extracts `<think>` tags into AI SDK reasoning
 //     parts (the provider also emits native `reasoning_content`)
 //   - image input for vision-capable models through standard AI SDK file parts
 //   - OpenAI Responses API models, which can be paired with
 //     `createMixlayerWebSocketFetch()` for Responses WebSocket streaming
-//   - tolerant model-id handling (strips a leading `mixlayer/` prefix)
+//   - experimental decision models (`provider.decisionModel(id)`) backed by
+//     Mixlayer's OpenAI-compatible `/v1/decisions` endpoint
+//   - tolerant model-id handling (strips a leading routing `mixlayer/` prefix)
 //
 // Usage mirrors any other AI SDK provider:
 //
@@ -36,9 +40,15 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { createOpenAI } from '@ai-sdk/openai'
 import { wrapLanguageModel, extractReasoningMiddleware } from 'ai'
 import type { LanguageModelMiddleware } from 'ai'
-import { NoSuchModelError, type LanguageModelV4, type ProviderV4 } from '@ai-sdk/provider'
+import {
+  NoSuchModelError,
+  UnsupportedFunctionalityError,
+  type Experimental_DecisionModelV4,
+  type LanguageModelV4,
+  type ProviderV4,
+} from '@ai-sdk/provider'
 import { MIXLAYER_DEFAULT_BASE_URL } from './constants'
-import type { MixlayerKnownModelId } from './model-catalog'
+import type { MixlayerKnownDecisionModelId, MixlayerKnownModelId } from './model-catalog'
 
 type MixlayerFetchFunction = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
@@ -58,35 +68,78 @@ export function isQwen35Or36(modelId: string): boolean {
 }
 
 /**
+ * Whether a model id is a DeepSeek **V4** model (`deepseek/deepseek-v4.1-flash`),
+ * which honors Mixlayer's `thinking` toggle on Chat Completions and
+ * `reasoning.effort: "none"` on Responses.
+ */
+export function isDeepSeekV4(modelId: string): boolean {
+  return /deepseek-?v4(?![0-9])/i.test(modelId)
+}
+
+/**
+ * Whether this provider manages the `thinking` toggle for a model id: Qwen
+ * 3.5 / 3.6 ({@link isQwen35Or36}) and DeepSeek V4 ({@link isDeepSeekV4}).
+ * Other models receive vanilla OpenAI-compatible requests.
+ */
+export function supportsMixlayerThinking(modelId: string): boolean {
+  return isQwen35Or36(modelId) || isDeepSeekV4(modelId)
+}
+
+/**
  * Returns `body` with Mixlayer's documented `thinking` request field set — but
- * only when `body.model` is a Qwen 3.5 / 3.6 model ({@link isQwen35Or36}) and
- * the caller hasn't already set `thinking` on the request themselves. Models
- * from other families and later Qwen generations are returned unchanged.
+ * only when `body.model` supports the toggle ({@link supportsMixlayerThinking})
+ * and the caller hasn't already set `thinking` on the request themselves.
+ * Other models are returned unchanged.
  *
  * Sampling defaults (`temperature`, `top_p`, `top_k`, penalties) are no longer
  * injected here — Mixlayer applies the recommended per-model defaults
  * server-side, so the provider only sends values the caller sets explicitly.
  */
-export function applyQwenThinking(
+export function applyMixlayerThinking(
   body: Record<string, unknown>,
   thinking = true
 ): Record<string, unknown> {
   const modelId = typeof body.model === 'string' ? body.model : ''
-  if (!isQwen35Or36(modelId)) return body
+  if (!supportsMixlayerThinking(modelId)) return body
   if (body.thinking !== undefined) return body
   return { ...body, thinking }
 }
 
+/** @deprecated Use {@link applyMixlayerThinking}, which also covers DeepSeek V4. */
+export const applyQwenThinking = applyMixlayerThinking
+
 /**
- * Strips a leading `mixlayer/` (or `mixlayer:`) prefix from a model id so
- * callers can pass either the bare upstream id (`qwen/qwen3.5-9b`) or a
- * routed/prefixed id (`mixlayer/qwen/qwen3.5-9b`). The model's own org segment
- * (e.g. `qwen/`) is preserved; anything without a recognized prefix is returned
- * unchanged.
+ * Returns `body` with an empty `description` added to every Chat Completions
+ * function tool that lacks one. Mixlayer rejects tools without the field, and
+ * AI SDK tools defined without a description omit it from the request.
+ */
+export function applyMixlayerToolDescriptions(
+  body: Record<string, unknown>
+): Record<string, unknown> {
+  if (!Array.isArray(body.tools)) return body
+
+  let changed = false
+  const tools = body.tools.map((tool: unknown) => {
+    if (!isRecord(tool) || !isRecord(tool.function)) return tool
+    if (typeof tool.function.description === 'string') return tool
+    changed = true
+    return { ...tool, function: { ...tool.function, description: '' } }
+  })
+  return changed ? { ...body, tools } : body
+}
+
+/**
+ * Strips a leading `mixlayer/` (or `mixlayer:`) routing prefix from a model id
+ * so callers can pass either the bare upstream id (`qwen/qwen3.5-9b`) or a
+ * routed/prefixed id (`mixlayer/qwen/qwen3.5-9b`). The prefix is only stripped
+ * when the rest still has its own org segment, so Mixlayer's first-party ids
+ * (`mixlayer/jini-qwen3.8-27b`) are preserved. Anything without a recognized
+ * prefix is returned unchanged.
  */
 export function extractMixlayerModelId(model: string): string {
   const trimmed = model.trim()
-  return trimmed.replace(/^mixlayer[/:]/i, '')
+  const match = /^mixlayer[/:](.+)$/i.exec(trimmed)
+  return match && match[1].includes('/') ? match[1] : trimmed
 }
 
 /**
@@ -95,6 +148,10 @@ export function extractMixlayerModelId(model: string): string {
  * keeps this safe in non-Node runtimes (e.g. Cloudflare Workers, the browser),
  * where you pass `apiKey` explicitly instead.
  */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+}
+
 function resolveMixlayerApiKey(explicit?: string): string | undefined {
   if (explicit) return explicit
   if (typeof process !== 'undefined' && process.env) return process.env.MIXLAYER_API_KEY
@@ -133,14 +190,10 @@ function createOpenAIResponsesFetch(
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
-}
-
 function createResponsesThinkingMiddleware(thinking: boolean): LanguageModelMiddleware {
   return {
     transformParams: async ({ params, model }) => {
-      if (thinking || !isQwen35Or36(model.modelId)) return params
+      if (thinking || !supportsMixlayerThinking(model.modelId)) return params
 
       const openaiOptions = isRecord(params.providerOptions?.openai)
         ? params.providerOptions.openai
@@ -192,11 +245,11 @@ export interface MixlayerProviderSettings {
   /** Include usage information in streaming responses. */
   includeUsage?: boolean
   /**
-   * Whether Qwen 3.5 / 3.6 models think. Chat Completions requests send
-   * Mixlayer's documented `thinking` field; Responses API models use
-   * `reasoning.effort: "none"` for `false` instead because `/responses`
+   * Whether Qwen 3.5 / 3.6 and DeepSeek V4 models think. Chat Completions
+   * requests send Mixlayer's documented `thinking` field; Responses API models
+   * use `reasoning.effort: "none"` for `false` instead because `/responses`
    * rejects the Chat Completions-only `thinking` field.
-   * Defaults to `true` — Qwen thinks by default.
+   * Defaults to `true` — these models think by default.
    */
   thinking?: boolean
   /**
@@ -228,10 +281,20 @@ export type MixlayerResponsesModelId = MixlayerChatModelId
 export type MixlayerLanguageModelId = MixlayerChatModelId
 
 /**
+ * Known Mixlayer decision model ids. Like {@link MixlayerChatModelId}, the
+ * union stays open so new decision models work before the snapshot updates.
+ */
+export type MixlayerDecisionModelId =
+  | MixlayerKnownDecisionModelId
+  // eslint-disable-next-line @typescript-eslint/ban-types -- open-union autocomplete idiom
+  | (string & {})
+
+/**
  * A Mixlayer provider. Callable directly (`mixlayer(modelId)`) and via the
  * standard AI SDK accessors. Works with `createProviderRegistry` for language
  * models. Vision-capable entries accept image input through standard AI SDK
- * file parts. This provider exposes language models only, not embeddings.
+ * file parts. Decision models are exposed through `decisionModel(id)` for the
+ * AI SDK's `experimental_decide`. Embeddings and image generation are not exposed.
  */
 export interface MixlayerProvider extends ProviderV4 {
   (modelId: MixlayerChatModelId): LanguageModelV4
@@ -242,6 +305,12 @@ export interface MixlayerProvider extends ProviderV4 {
   responses(modelId: MixlayerChatModelId): LanguageModelV4
   chatModel(modelId: MixlayerChatModelId): LanguageModelV4
   responsesModel(modelId: MixlayerChatModelId): LanguageModelV4
+  /**
+   * Creates an experimental decision model backed by Mixlayer's `/v1/decisions`
+   * endpoint, for `experimental_decide`. Supports `boolean`, `choice`, and
+   * `score` questions over text and JSON state; file (image) state is rejected.
+   */
+  decisionModel(modelId: MixlayerDecisionModelId): Experimental_DecisionModelV4
   /** Embeddings are not exposed by this provider. Always throws NoSuchModelError. */
   embeddingModel(modelId: string): never
   /** Image generation is not exposed by this provider. Always throws NoSuchModelError. */
@@ -250,13 +319,13 @@ export interface MixlayerProvider extends ProviderV4 {
 
 /**
  * Creates a Mixlayer provider backed by `@ai-sdk/openai-compatible` for Chat
- * Completions and `@ai-sdk/openai` for Responses API models. Chat Completions
- * requests for Qwen 3.5 / 3.6 models carry the `thinking` toggle (sampling
- * defaults are applied server-side by Mixlayer). Responses API models use the
- * OpenAI-compatible request shape so they work with Mixlayer's Responses HTTP
- * and WebSocket endpoints; for Qwen 3.5 / 3.6, `thinking: false` maps to
- * `reasoning.effort: "none"`. Both model types are wrapped with `<think>`-tag
- * reasoning extraction.
+ * Completions and `@ai-sdk/openai` for Responses API and decision models. Chat
+ * Completions requests for Qwen 3.5 / 3.6 and DeepSeek V4 models carry the
+ * `thinking` toggle (sampling defaults are applied server-side by Mixlayer).
+ * Responses API models use the OpenAI-compatible request shape so they work
+ * with Mixlayer's Responses HTTP and WebSocket endpoints; for those models,
+ * `thinking: false` maps to `reasoning.effort: "none"`. Both language model
+ * types are wrapped with `<think>`-tag reasoning extraction.
  */
 export function createMixlayer(settings: MixlayerProviderSettings = {}): MixlayerProvider {
   const thinking = settings.thinking ?? true
@@ -269,10 +338,11 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
     headers: settings.headers,
     fetch: settings.fetch,
     includeUsage: settings.includeUsage,
-    // Set the Qwen thinking toggle; scoped to Qwen 3.5 / 3.6, other families
-    // pass through, and a caller-set `thinking` value wins. Sampling defaults
-    // are applied server-side by Mixlayer.
-    transformRequestBody: (body: Record<string, unknown>) => applyQwenThinking(body, thinking),
+    // Set the thinking toggle; scoped to Qwen 3.5 / 3.6 and DeepSeek V4, other
+    // models pass through, and a caller-set `thinking` value wins. Sampling
+    // defaults are applied server-side by Mixlayer.
+    transformRequestBody: (body: Record<string, unknown>) =>
+      applyMixlayerToolDescriptions(applyMixlayerThinking(body, thinking)),
   })
 
   const openaiResponses = createOpenAI({
@@ -310,6 +380,30 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
     return wrapResponsesModel(openaiResponses.responses(resolved))
   }
 
+  const createDecisionModel = (
+    modelId: MixlayerDecisionModelId
+  ): Experimental_DecisionModelV4 => {
+    // Mixlayer's `/v1/decisions` speaks the OpenAI Decisions wire format, but
+    // accepts text input only — reject file state before any I/O.
+    const model = openaiResponses.decisionModel(extractMixlayerModelId(modelId))
+    return {
+      specificationVersion: model.specificationVersion,
+      provider: model.provider,
+      modelId: model.modelId,
+      supportedQuestionTypes: model.supportedQuestionTypes,
+      doDecide: async options => {
+        for (const part of options.state) {
+          if (part.type === 'file') {
+            throw new UnsupportedFunctionalityError({
+              functionality: `Mixlayer decision file input: ${part.mediaType}`,
+            })
+          }
+        }
+        return model.doDecide(options)
+      },
+    }
+  }
+
   const createDefaultModel =
     settings.defaultModelApi === 'responses' ? createResponsesModel : createChatModel
 
@@ -320,6 +414,7 @@ export function createMixlayer(settings: MixlayerProviderSettings = {}): Mixlaye
   provider.responses = createResponsesModel
   provider.chatModel = createChatModel
   provider.responsesModel = createResponsesModel
+  provider.decisionModel = createDecisionModel
   provider.embeddingModel = (modelId: string): never => {
     throw new NoSuchModelError({ modelId, modelType: 'embeddingModel' })
   }
