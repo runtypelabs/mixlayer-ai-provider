@@ -3,12 +3,17 @@ export {
   mixlayer,
   extractMixlayerModelId,
   isQwen35Or36,
+  isDeepSeekV4,
+  supportsMixlayerThinking,
+  applyMixlayerThinking,
   applyQwenThinking,
+  applyMixlayerToolDescriptions,
   type MixlayerProvider,
   type MixlayerProviderSettings,
   type MixlayerChatModelId,
   type MixlayerResponsesModelId,
   type MixlayerLanguageModelId,
+  type MixlayerDecisionModelId,
 } from './mixlayer-provider'
 
 export {
@@ -30,6 +35,8 @@ export {
 export {
   MIXLAYER_KNOWN_MODEL_IDS,
   MIXLAYER_VISION_MODEL_IDS,
+  MIXLAYER_DECISION_MODEL_IDS,
   type MixlayerKnownModelId,
   type MixlayerVisionModelId,
+  type MixlayerKnownDecisionModelId,
 } from './model-catalog'

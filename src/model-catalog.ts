@@ -3,6 +3,7 @@
  * closed allowlist or the result of live model discovery.
  */
 export const MIXLAYER_KNOWN_MODEL_IDS = [
+  'deepseek/deepseek-v4.1-flash',
   'qwen/qwen3.5-4b-free',
   'qwen/qwen3.5-9b',
   'qwen/qwen3.5-35b-a3b',
@@ -29,3 +30,11 @@ export const MIXLAYER_VISION_MODEL_IDS = [
 ] as const satisfies readonly MixlayerKnownModelId[]
 
 export type MixlayerVisionModelId = (typeof MIXLAYER_VISION_MODEL_IDS)[number]
+
+/**
+ * Known Mixlayer decision models, served by `/v1/decisions` rather than Chat
+ * Completions or Responses. Use them through `provider.decisionModel(id)`.
+ */
+export const MIXLAYER_DECISION_MODEL_IDS = ['mixlayer/jini-qwen3.8-27b'] as const
+
+export type MixlayerKnownDecisionModelId = (typeof MIXLAYER_DECISION_MODEL_IDS)[number]

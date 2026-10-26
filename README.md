@@ -5,31 +5,35 @@
 
 An [AI SDK](https://sdk.vercel.ai) provider for [Mixlayer](https://www.mixlayer.com/),
 which serves open-weight models over an OpenAI-compatible endpoint.
-Mixlayer's current catalog includes Qwen and GLM models. This provider accepts
+Mixlayer's current catalog includes Qwen, GLM, and DeepSeek models, plus decision
+models for typed judgments. This provider accepts
 any model id and adds family-specific behavior only for models it recognizes.
 
 It wraps [`@ai-sdk/openai-compatible`](https://www.npmjs.com/package/@ai-sdk/openai-compatible)
 for Chat Completions and [`@ai-sdk/openai`](https://www.npmjs.com/package/@ai-sdk/openai)
-for Responses API models, baking in everything Mixlayer needs to behave
+for Responses API and decision models, baking in everything Mixlayer needs to behave
 correctly out of the box:
 
 - the Mixlayer base URL
-- the Qwen thinking toggle (Chat Completions `thinking` field / Responses
-  `reasoning.effort`), scoped to the Qwen 3.5 / 3.6 models
+- the thinking toggle (Chat Completions `thinking` field / Responses
+  `reasoning.effort`), scoped to Qwen 3.5 / 3.6 and DeepSeek V4 models
+- an empty `description` on Chat Completions tools defined without one, which
+  Mixlayer requires
 - reasoning support — `<think>` tags and native `reasoning_content` both surface
   as AI SDK reasoning parts
 - image input through standard AI SDK file parts on vision-capable models
 - Responses API models and a Responses WebSocket `fetch` adapter for lower
   latency streaming on repeat calls
-- tolerant model-id handling (strips a leading `mixlayer/` prefix)
+- experimental decision models for the AI SDK's `experimental_decide`
+- tolerant model-id handling (strips a leading routing `mixlayer/` prefix)
 
 ## Install
 
 ```bash
-pnpm add @runtypelabs/mixlayer-ai-provider ai@^7.0.127
+pnpm add @runtypelabs/mixlayer-ai-provider ai@^7.0.146
 ```
 
-This package requires AI SDK 7.0.127 or later in the v7 series and is ESM-only.
+This package requires AI SDK 7.0.146 or later in the v7 series and is ESM-only.
 For Node.js applications, use Node.js 22+. The package avoids Node-only
 WebSocket dependencies so it
 can be bundled for standards-based runtimes such as Cloudflare Workers. `ai` is
@@ -58,7 +62,7 @@ import { createMixlayer } from '@runtypelabs/mixlayer-ai-provider'
 
 const provider = createMixlayer({
   apiKey: process.env.MIXLAYER_API_KEY,
-  thinking: false, // disable Qwen 3.5 / 3.6 thinking
+  thinking: false, // disable Qwen 3.5 / 3.6 and DeepSeek V4 thinking
 })
 
 const model = provider('qwen/qwen3.5-9b')
@@ -108,7 +112,7 @@ import { streamText } from 'ai'
 
 const provider = createMixlayer({
   apiKey: process.env.MIXLAYER_API_KEY,
-  thinking: false, // for Qwen 3.5 / 3.6, maps to reasoning.effort: 'none'
+  thinking: false, // for Qwen 3.5 / 3.6 and DeepSeek V4, maps to reasoning.effort: 'none'
 })
 
 const result = streamText({
@@ -170,10 +174,40 @@ const registry = createProviderRegistry({ mixlayer })
 const model = registry.languageModel('mixlayer:qwen/qwen3.6-27b')
 ```
 
+### Decision models
+
+Decision models such as `mixlayer/jini-qwen3.8-27b` answer typed questions about
+a shared state and return probabilities instead of generated text. They are
+served by Mixlayer's `/v1/decisions` endpoint and plug into the AI SDK's
+experimental `experimental_decide` API:
+
+```ts
+import { experimental_decide as decide } from 'ai'
+
+const { answers } = await decide({
+  model: mixlayer.decisionModel('mixlayer/jini-qwen3.8-27b'),
+  state: 'Customer: my order arrived broken and I want a refund NOW.',
+  questions: {
+    angry: { type: 'boolean', instructions: 'Is the customer angry?' },
+    intent: { type: 'choice', criteria: { refund: null, shipping: null, other: null } },
+    urgency: { type: 'score', instructions: 'Urgency', criteria: ['low', 'medium', 'high'] },
+  },
+})
+
+answers.angry.probability // 0.99
+answers.intent.choice // 'refund'
+```
+
+Mixlayer supports `boolean`, `choice`, and `score` questions over text and JSON
+state. File (image) state is rejected before any request is sent. Decision
+models also resolve through registries with
+`registry.decisionModel('mixlayer:mixlayer/jini-qwen3.8-27b')`. The decision API
+is experimental in the AI SDK and may change in patch releases.
+
 ## Models
 
-Pass any model id from Mixlayer's catalog, such as `qwen/qwen3.8-27b` or
-`z-ai/glm-5.3`. Use the [List models API](https://docs.mixlayer.com/api-reference/inference-ap-is/models/list-models)
+Pass any model id from Mixlayer's catalog, such as `qwen/qwen3.8-27b`,
+`z-ai/glm-5.3`, or `deepseek/deepseek-v4.1-flash`. Use the [List models API](https://docs.mixlayer.com/api-reference/inference-ap-is/models/list-models)
 for the models available to your API key, or the
 [Mixlayer console](https://console.mixlayer.com/) for current availability and
 pricing. The [models overview](https://docs.mixlayer.com/models) describes the
@@ -185,6 +219,8 @@ known members from that snapshot but remains open. It accepts any model id
 string, so new models and future families work without a package update.
 `MIXLAYER_VISION_MODEL_IDS` is the corresponding conservative snapshot for
 models validated with image input; `MixlayerVisionModelId` derives from it.
+`MIXLAYER_DECISION_MODEL_IDS` lists known decision models, which work only with
+`provider.decisionModel(id)`.
 
 ## Sampling and thinking
 
@@ -196,14 +232,15 @@ The provider sends only the sampling parameters you set on a request, such as
 
 For Chat Completions models (`provider(id)`, `provider.chat(id)`, and
 `provider.chatModel(id)`), the provider sends Mixlayer's documented `thinking`
-request field based on the `thinking` setting. It applies only to Qwen 3.5 and
-3.6 models. Qwen 3.8 and other model families pass through without an injected
-thinking setting. A `thinking` value you set on the request body yourself wins.
-Use the exported `isQwen35Or36(modelId)` helper if you need the same predicate.
+request field based on the `thinking` setting. It applies only to Qwen 3.5 / 3.6
+and DeepSeek V4 models. Qwen 3.8 and other model families pass through without
+an injected thinking setting. A `thinking` value you set on the request body
+yourself wins. Use the exported `supportsMixlayerThinking(modelId)` helper if
+you need the same predicate.
 
 Responses API models (`provider.responses(id)`) use the OpenAI Responses request
 shape so they remain compatible with Mixlayer's Responses HTTP and WebSocket
-endpoints. For Qwen 3.5 / 3.6 Responses API calls, `thinking: false` maps to the
+endpoints. For Qwen 3.5 / 3.6 and DeepSeek V4 Responses API calls, `thinking: false` maps to the
 OpenAI-compatible `reasoning.effort: 'none'` request shape because the Responses
 API rejects the Chat Completions-only `thinking` field.
 
@@ -216,11 +253,16 @@ API rejects the Chat Completions-only `thinking` field.
 | `createMixlayerWebSocketFetch(options?)`                        | Fetch adapter for Responses API streaming over WebSocket         |
 | `MIXLAYER_KNOWN_MODEL_IDS`                                     | Readonly snapshot of known model ids                              |
 | `MIXLAYER_VISION_MODEL_IDS`                                    | Readonly snapshot of known image-input model ids                  |
-| `extractMixlayerModelId(id)`                                    | Strips a leading `mixlayer/` prefix                              |
-| `isQwen35Or36(modelId)`                                         | Whether an id is a Qwen 3.5 / 3.6 model (the scoped generations) |
-| `applyQwenThinking(body, thinking?)`                            | Sets the `thinking` field on a request body, scoped to Qwen 3.5 / 3.6 |
-| `MIXLAYER_DEFAULT_BASE_URL`                                     | `https://mixlayer.ai/v1`                                  |
-| `MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL`                      | `wss://mixlayer.ai/v1/responses`                          |
+| `MIXLAYER_DECISION_MODEL_IDS`                                  | Readonly snapshot of known decision model ids                     |
+| `extractMixlayerModelId(id)`                                    | Strips a leading routing `mixlayer/` prefix                      |
+| `supportsMixlayerThinking(modelId)`                             | Whether the provider manages the thinking toggle for a model id  |
+| `isQwen35Or36(modelId)`                                         | Whether an id is a Qwen 3.5 / 3.6 model                          |
+| `isDeepSeekV4(modelId)`                                         | Whether an id is a DeepSeek V4 model                             |
+| `applyMixlayerThinking(body, thinking?)`                        | Sets the `thinking` field on a request body for supported models |
+| `applyQwenThinking(body, thinking?)`                            | Deprecated alias of `applyMixlayerThinking`                      |
+| `applyMixlayerToolDescriptions(body)`                           | Adds an empty `description` to tools that lack one               |
+| `MIXLAYER_DEFAULT_BASE_URL`                                     | `https://mixlayer.ai/v1`                                         |
+| `MIXLAYER_DEFAULT_RESPONSES_WEBSOCKET_URL`                      | `wss://mixlayer.ai/v1/responses`                                 |
 | `getMixlayerResponsesWebSocketURL(baseURL?)`                    | Derives a Responses WebSocket URL from an HTTP base URL          |
 
 The provider also exposes:
@@ -228,6 +270,7 @@ The provider also exposes:
 - `provider.languageModel(id)` — equivalent to calling `provider(id)`
 - `provider.chat(id)` / `provider.chatModel(id)` — Chat Completions model
 - `provider.responses(id)` / `provider.responsesModel(id)` — Responses API model
+- `provider.decisionModel(id)` — experimental decision model
 
 ### `MixlayerProviderSettings`
 
@@ -238,7 +281,7 @@ The provider also exposes:
 | `headers`         | `Record<string,string>` | —                           | Extra headers sent with every request                                    |
 | `fetch`           | `typeof fetch`         | `globalThis.fetch`          | Custom fetch; pass `createMixlayerWebSocketFetch()` for WS streaming     |
 | `includeUsage`    | `boolean`              | —                           | Include usage information in streaming Chat Completions responses        |
-| `thinking`        | `boolean`              | `true`                      | Qwen 3.5 / 3.6 thinking toggle; Responses uses `reasoning.effort: 'none'` for `false` |
+| `thinking`        | `boolean`              | `true`                      | Qwen 3.5 / 3.6 and DeepSeek V4 thinking toggle; Responses uses `reasoning.effort: 'none'` for `false` |
 | `defaultModelApi` | `'chat' \| 'responses'` | `'chat'`                    | API used by `provider(id)` and `provider.languageModel(id)`              |
 
 ### `createMixlayerWebSocketFetch(options)`

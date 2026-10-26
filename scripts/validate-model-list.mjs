@@ -7,6 +7,7 @@ import { resolve } from 'node:path'
 const SOURCE_FILE = resolve('src/model-catalog.ts')
 const CATALOG_NAME = 'MIXLAYER_KNOWN_MODEL_IDS'
 const VISION_CATALOG_NAME = 'MIXLAYER_VISION_MODEL_IDS'
+const DECISION_CATALOG_NAME = 'MIXLAYER_DECISION_MODEL_IDS'
 const DEFAULT_BASE_URL = 'https://mixlayer.ai/v1'
 
 const apiKey = process.env.MIXLAYER_API_KEY
@@ -16,10 +17,21 @@ if (!apiKey) {
   fail('MIXLAYER_API_KEY is required to validate the live Mixlayer model catalog.')
 }
 
-const localModels = await readRuntimeCatalog(CATALOG_NAME)
+const languageModels = await readRuntimeCatalog(CATALOG_NAME)
 const visionModels = await readRuntimeCatalog(VISION_CATALOG_NAME)
+const decisionModels = await readRuntimeCatalog(DECISION_CATALOG_NAME)
 const liveModels = await fetchLiveModels()
-const unknownVisionModels = visionModels.filter(model => !localModels.includes(model))
+// `/v1/models` lists language and decision models together without a kind, so
+// the two snapshots are validated as one catalog.
+const localModels = [...languageModels, ...decisionModels].sort()
+const unknownVisionModels = visionModels.filter(model => !languageModels.includes(model))
+const overlappingModels = decisionModels.filter(model => languageModels.includes(model))
+
+if (overlappingModels.length > 0) {
+  fail(
+    `${DECISION_CATALOG_NAME} contains model id(s) also listed in ${CATALOG_NAME}: ${overlappingModels.join(', ')}`
+  )
+}
 
 if (unknownVisionModels.length > 0) {
   fail(
@@ -31,14 +43,15 @@ const missingFromCatalog = liveModels.filter(model => !localModels.includes(mode
 const staleCatalog = localModels.filter(model => !liveModels.includes(model))
 
 console.log(`Live Mixlayer models: ${liveModels.length}`)
-console.log(`Runtime catalog models: ${localModels.length}`)
+console.log(`Runtime catalog models: ${languageModels.length}`)
 console.log(`Known vision models: ${visionModels.length}`)
+console.log(`Known decision models: ${decisionModels.length}`)
 
 if (missingFromCatalog.length > 0 || staleCatalog.length > 0) {
   if (missingFromCatalog.length > 0) {
     annotate(
       'error',
-      `${CATALOG_NAME} is missing live model id(s): ${missingFromCatalog.join(', ')}`
+      `${CATALOG_NAME} / ${DECISION_CATALOG_NAME} are missing live model id(s): ${missingFromCatalog.join(', ')}`
     )
     console.error('\nMissing from runtime catalog:')
     for (const model of missingFromCatalog) console.error(`  + ${model}`)
@@ -47,19 +60,19 @@ if (missingFromCatalog.length > 0 || staleCatalog.length > 0) {
   if (staleCatalog.length > 0) {
     annotate(
       'error',
-      `${CATALOG_NAME} contains model id(s) not returned by Mixlayer: ${staleCatalog.join(', ')}`
+      `${CATALOG_NAME} / ${DECISION_CATALOG_NAME} contain model id(s) not returned by Mixlayer: ${staleCatalog.join(', ')}`
     )
     console.error('\nStale/deprecated in runtime catalog:')
     for (const model of staleCatalog) console.error(`  - ${model}`)
   }
 
   console.error(
-    `\nUpdate ${CATALOG_NAME} in ${SOURCE_FILE} so the runtime catalog matches the live Mixlayer catalog.`
+    `\nUpdate ${CATALOG_NAME} (language models) or ${DECISION_CATALOG_NAME} (decision models) in ${SOURCE_FILE} so the runtime catalog matches the live Mixlayer catalog.`
   )
   process.exit(1)
 }
 
-console.log(`${CATALOG_NAME} matches the live Mixlayer model catalog.`)
+console.log(`${CATALOG_NAME} and ${DECISION_CATALOG_NAME} match the live Mixlayer model catalog.`)
 
 async function readRuntimeCatalog(catalogName) {
   const sourceText = await readFile(SOURCE_FILE, 'utf8')
